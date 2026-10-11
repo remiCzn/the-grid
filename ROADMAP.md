@@ -1,103 +1,111 @@
-# Feuille de Route (Roadmap) : The Grid
+# 🗺️ Roadmap : The Grid
 
-Cette feuille de route formalise les jalons d'implémentation de **The Grid**, de l'architecture initiale jusqu'au moteur modulaire complet.
-
----
-
-## Vue d'Ensemble des Jalons
-
-```text
-[x] Étape 1 : Arborescence Workspace, Toolchain & Scaffolding
-[x] Étape 2 : Runtime Audio CPAL, Canaux SPSC Lock-Free & Télémétrie
-[x] Étape 3 : Modèle de Patch, Algorithme Topologique & Commandes IPC
-[x] Étape 4 : Télémétrie Décimée Host -> Frontend & Vu-Mètres UI
-[x] Étape 5 : Rendu Canvas 2D Interactif (Grille & Câbles de Bézier)
-[x] Étape 6 : Primitives DSP (Oscillateur Sin/Saw/Square, Filtre SVF, Enveloppe ADSR)
-[x] Étape 7 : Rendu Audio Réel & Gestion Polyphonique / Modulation CV
-```
+Ce document détaille la trajectoire de développement de **The Grid**. Les priorités sont articulées pour préserver l'intransigeance temps réel du moteur, améliorer l'ergonomie visuelle du patcher et étendre progressivement le potentiel sonore du synthétiseur.
 
 ---
 
-## Détail des Jalons
+## 📌 État Actuel : Jalons 1 à 7 (v0.1.0 - Alpha Fondatrice) ✅
 
-### ✅ Étape 1 : Arborescence Workspace, Toolchain & Scaffolding
-- **Statut :** Terminé.
-- **Livrables :**
-  - Cargo Workspace avec crates isolées : `grid-core`, `grid-engine`, `grid-app`.
-  - Frontend initialisé avec Vite, TypeScript et Bun.
-  - Configuration Tauri v2 (`tauri.conf.json`) et styles de base (dark theme Bitwig).
-
-### ✅ Étape 2 : Runtime Audio CPAL, Canaux SPSC Lock-Free & Télémétrie
-- **Statut :** Terminé (11 tests passés, > 98% couverture logique DSP).
-- **Livrables :**
-  - Driver CPAL stéréo [`AudioDriver`](file:///home/freebox/the-grid/crates/grid-engine/src/driver.rs).
-  - Processeur temps réel [`RealtimeAudioProcessor`](file:///home/freebox/the-grid/crates/grid-engine/src/realtime.rs) garanti sans allocation (`no malloc`) et sans mutex (`no lock`).
-  - Ring buffers SPSC lock-free [`HostChannels` / `EngineChannels`](file:///home/freebox/the-grid/crates/grid-engine/src/ringbuffer.rs) (`rtrb`).
-  - Télémétrie décimée à 60 Hz avec politique `drop-on-full`.
-  - Registre de référence dans [`GUIDELINES.md`](file:///home/freebox/the-grid/GUIDELINES.md).
+- [x] **Workspace Cargo multi-crates** : Séparation stricte `grid-core`, `grid-engine`, `grid-app`.
+- [x] **Thread audio temps réel** : Pilote CPAL, SPSC Ring Buffers (`rtrb`), zéro allocation, zéro mutex.
+- [x] **Catalogue DSP initial** : VCO (PolyBLEP anti-aliasing), VCF (SVF TPT 12dB), VCA, ADSR, Constant, AudioOut.
+- [x] **Compilateur DAG** : Tri topologique de Kahn avec génération de plan d'exécution linéaire.
+- [x] **Patcher Canvas 2D** : Câblage Bézier interactif, drag-and-drop des modules, réglage des potentiomètres.
+- [x] **Télémétrie 60 Hz** : Vu-mètre stéréo calibré en dBFS sans surcharge IPC.
+- [x] **Persistance** : Sérialisation et désérialisation de patches en format JSON (`.grid.json`).
+- [x] **Qualité** : Couverture de tests > 90 % sur le core DSP et la validation topologique.
 
 ---
 
-### ⏳ Étape 3 : Modèle de Patch, Algorithme Topologique & Commandes IPC
-- **Objectifs :**
-  1. Enrichir les structures de données du patch dans `grid-core` :
-     - Définition d'un catalogue de modules (`Oscillator`, `Gain`, `AudioOut`).
-     - Gestion des ports d'entrée/sortie typés (`Audio`, `CV`, `Trigger`).
-     - Gestion des câbles connectant deux ports.
-  2. Implémenter le tri topologique (Kahn / DFS DAG) dans `grid-core/src/graph.rs` :
-     - Détection stricte des cycles de feedback immédiats.
-     - Ordonnancement séquentiel des nœuds.
-  3. Implémenter le compilateur `grid-core/src/compiler.rs` produisant un `ExecutionPlan` linéaire avec indexation de scratch buffers.
-  4. Ajouter la commande IPC Tauri `apply_patch` dans `grid-app` qui valide, compile hors thread audio, et transmet le plan au moteur.
-- **Critères de validation :**
-  - Tests unitaires complets sur le tri topologique, la détection de cycle et l'assignation de mémoire.
-  - Maintien strict du taux de couverture.
+## 🚀 Jalon 8 : Jouabilité Immédiate & MIDI (v0.2.0)
+*Objectif : Rendre le patcher jouable en direct au clavier matériel et virtuel.*
+
+- [ ] **Intégration MIDI matérielle (`midir`)** :
+  - Détection automatique et connexion à chaud des périphériques USB-MIDI.
+  - Ring buffer lock-free dédié pour injecter les événements MIDI dans le thread audio.
+- [ ] **Gestionnaire de voix monophonique** :
+  - Modes de priorité de note configurables : *Last Note*, *Low Note*, *High Note*.
+  - Prise en charge du *Legato* (enchaînement de notes sans réamorcer l'enveloppe) et du *Retrigger*.
+- [ ] **Module `MidiIn` étendu** :
+  - Sorties CV normalisées : Pitch ($1\,\text{V/oct}$), Gate, Velocity, ModWheel (CC1), Pitch Bend.
+- [ ] **Clavier virtuel à l'écran** :
+  - Barre de clavier rétractable en bas de l'interface pour jouer à la souris ou au clavier AZERTY/QWERTY.
 
 ---
 
-### ⏳ Étape 4 : Télémétrie Décimée Host -> Frontend & Vu-Mètres UI
-- **Objectifs :**
-  1. Implémenter dans `grid-app` une tâche de fond asynchrone (thread ou Tokio task) dépilant `telemetry_consumer` à 30–60 Hz.
-  2. Émettre l'événement Tauri `telemetry_update` (`app.emit`) vers le WebView.
-  3. Côté frontend : écouter l'événement via `@tauri-apps/api/event` et afficher un vu-mètre stéréo dynamique réactif (LED/barre de niveau crête et RMS).
-- **Critères de validation :**
-  - Aucune charge excessive sur l'IPC Tauri (décimation stricte garantie).
-  - Tests d'intégration validant le cycle de dépilage.
+## 🔄 Jalon 9 : Résilience du Graphe & Boucles de Feedback (v0.3.0)
+*Objectif : Autoriser les interconnexions cycliques indispensables au son modulaire.*
+
+- [ ] **Détection des arcs de rétroaction (*Back-Edges*)** :
+  - Parcours DFS à 3 couleurs pour isoler les connexions circulaires avant le tri de Kahn.
+- [ ] **Insertion automatique de délai unitaire ($z^{-1}$)** :
+  - Routage des cycles vers un jeu de buffers d'historique (retard d'un bloc de 64 samples).
+  - Levée des blocages de compilation lors des auto-modulations (cross-modulation FM, feedback de filtre).
+- [ ] **Atténuation par câble (*Cable Amount*)** :
+  - Dosage de l'amplitude $[-1.0, 1.0]$ directement sur chaque câble sans nécessiter de module atténuateur dédié.
 
 ---
 
-### ⏳ Étape 5 : Rendu Canvas 2D Interactif (Grille & Câbles de Bézier)
-- **Objectifs :**
-  1. Moteur de rendu Canvas 2D léger et réactif dans `frontend/src/canvas/` :
-     - Grille modulaire à pas fixe (ex: 32px ou 48px).
-     - Rendu des modules sous forme de cartes modulaires avec slots de ports.
-     - Tracé des connexions par courbes de Bézier cubiques stylisées couleur par type de signal (Audio orange, CV bleu, Trigger jaune).
-  2. Interactions utilisateur : drag & drop des modules, création de câbles au clic/glisser entre ports compatibles.
-  3. Synchronisation automatique avec le backend via `apply_patch`.
-- **Critères de validation :**
-  - Fluidité 60/120 FPS sur Canvas.
-  - Validation interactive des connexions (interdire le raccordement sortie-sortie ou boucles illégales).
+## 🖥️ Jalon 10 : Ergonomie Spatiale & Workflow Canvas (v0.4.0)
+*Objectif : Fluidifier la manipulation sur des patchs denses et complexes.*
+
+- [ ] **Navigation infinie (Pan & Zoom)** :
+  - Translation par clic molette / espace + glisser.
+  - Zoom fluide centré sur le curseur avec grille matricielle adaptative (LOD).
+- [ ] **Navigateur de modules contextuel (*Module Browser*)** :
+  - Menu contextuel au clic-droit avec filtre de recherche instantané au clavier.
+  - Catégorisation des modules (Générateurs, Filtres, Enveloppes, Maths, Routage).
+- [ ] **Productivité d'édition** :
+  - Boîte de sélection multiple, déplacement de groupes, duplication (`Ctrl+D`), suppression (`Suppr`).
+- [ ] **Visualisation de signal sur les câbles** :
+  - Rendu visuel de l'amplitude ou des impulsions par pulsation lumineuse sur les courbes de Bézier.
 
 ---
 
-### ⏳ Étape 6 : Primitives DSP (Modules Sonores)
-- **Objectifs :**
-  1. Implémentation des structures DSP préallouées dans `grid-engine/src/dsp/` :
-     - `Oscillator` : Sine, Triangle, Sawtooth, Pulse (anti-aliasing de base / PolyBLEP).
-     - `StateVariableFilter` (SVF) : Low-pass, High-pass, Band-pass résonant.
-     - `Envelope` : ADSR linéaire / exponentiel déclenché par Trigger.
-     - `VcaGain` : Atténuateur / amplificateur contrôlé en tension.
-  2. Rendu audio audible via CPAL.
-- **Critères de validation :**
-  - Stabilité numérique des filtres, absence de division par zéro ou NaN.
-  - Respect absolu de la règle Zero-Alloc pendant le rendu des échantillons.
+## 🎛️ Jalon 11 : Expansion du Catalogue Modulaire (v0.5.0)
+*Objectif : Débloquer la création de textures sonores avancées typiques de Bitwig.*
+
+- [ ] **Modulateurs & Contrôle** :
+  - **`LFO`** : Multi-formes d'ondes, synchronisation tempo (divisions/multiplications) ou mode continu en Hz.
+  - **`Noise`** : Générateur de bruit blanc et bruit rose.
+  - **`Sample & Hold`** : Échantillonneur-bloqueur avec entrée horloge externe.
+- [ ] **Effets DSP** :
+  - **`Stereo Delay`** : Ligne à retard synchronisée avec filtrage coupe-haut/coupe-bas dans la boucle.
+  - **`Drive / Saturation`** : Algorithmes de waveshaping non-linéaires (soft clipping, saturation asymétrique).
+- [ ] **Maths & Logique** :
+  - **`Math`** : Modules d'addition, soustraction, multiplication et inversion bipolaire.
+  - **`Min/Max` & `Comparator`** : Traitement de signaux de contrôle complexes.
 
 ---
 
-### ⏳ Étape 7 : Rendu Audio Réel & Gestion Polyphonique / Modulation CV
-- **Objectifs :**
-  1. Support de modulations croisées en temps réel (FM linéaire, modulation de coupure de filtre).
-  2. Entrée MIDI / Clavier virtuel.
-  3. Export et import de fichiers `.grid` (JSON).
-- **Critères de validation :**
-  - Test de stress de charge CPU (< 5% pour 30 modules à 48 kHz).
+## ⏱️ Jalon 12 : Transport & Séquençage (v0.6.0)
+*Objectif : Permettre la création de motifs autonomes et génératifs sans DAW externe.*
+
+- [ ] **Moteur de Transport Interne** :
+  - Gestionnaire de tempo BPM maître, lecture/arrêt, signatures rythmiques.
+- [ ] **Step Sequencer (8 / 16 pas)** :
+  - Éditeur visuel de pas avec curseurs de pitch, probabilité et durée de gate par pas.
+- [ ] **Diviseur d'horloge (*Clock Divider*)** :
+  - Génération de sous-rythmes ($/2, /4, /8, /16$) pour piloter des enveloppes secondaires.
+
+---
+
+## 🎹 Jalon 13 : Moteur Polyphonique (v0.7.0)
+*Objectif : Passer du synthétiseur monophonique à un synthé polyphonique complet.*
+
+- [ ] **Pool de voix DSP vectorisé** :
+  - Allocation dynamique de 4 à 8 voix avec algorithme de vol de voix (*voice stealing*).
+- [ ] **Isolation des sections mono vs poly** :
+  - Détection automatique des nœuds polyphoniques (VCO, VCF, ADSR) et sommation vers les effets master stéréo.
+
+---
+
+## 📦 Jalon 14 : Distribution & Intégrations Externes (v1.0.0)
+*Objectif : Mettre l'outil entre les mains des producteurs sur tous les OS.*
+
+- [ ] **Panneau de configuration audio** :
+  - Choix de la carte son, sélection du sample rate (44.1, 48, 96 kHz) et réglage de la taille du buffer (64 à 512).
+- [ ] **Installeurs natifs multiplateformes** :
+  - Pipelines CI/CD pour paquets `.deb`, `AppImage`, `.dmg` (notarisé macOS) et `.msi` (Windows).
+- [ ] **Hébergement sous forme de Plugin (CLAP / VST3)** :
+  - Wrapper via `nih-plug` ou `clack` permettant de charger *The Grid* directement dans Bitwig, Reaper ou Ableton Live.

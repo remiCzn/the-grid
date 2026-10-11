@@ -82,40 +82,24 @@ Le projet dispose d'une base technique complète et opérationnelle :
 
 ---
 
-## 4. Feuille de Route : Les Prochaines Étapes
+## 4. Feuille de Route : Jalons 8 à 14 (v0.2.0 à v1.0.0)
 
-Pour faire évoluer ce moteur vers un instrument de production complet, quatre axes prioritaires sont planifiés :
+Pour faire évoluer ce moteur vers un instrument de production complet, la trajectoire officielle est structurée ainsi :
 
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│                        AXE 1 : MIDI & JOUABILITÉ                       │
-│  - Entrée MIDI USB temps réel (crate midir)                            │
-│  - Allocation de voix polyphoniques (4 à 8 voix, modes Mono / Legato)   │
-│  - Clavier de piano virtuel interactif à l'écran                       │
-└────────────────────────────────────────────────────────────────────────┘
-                                    │
-┌────────────────────────────────────────────────────────────────────────┐
-│                   AXE 2 : CATALOGUE MODULAIRE ÉTENDU                   │
-│  - LFO multi-formes synchronisable au tempo                            │
-│  - Séquenceur pas à pas (Step Sequencer 8/16 pas)                      │
-│  - Effets DSP intégrés : Stereo Delay / Echo et Saturation analogique  │
-│  - Générateur de bruit (Noise) & Sample & Hold                         │
-└────────────────────────────────────────────────────────────────────────┘
-                                    │
-┌────────────────────────────────────────────────────────────────────────┐
-│                 AXE 3 : EXPÉRIENCE UTILISATEUR & CANVAS                │
-│  - Menu contextuel d'ajout de modules au clic-droit (Browser modulaire)│
-│  - Pan & Zoom fluide sur la grille                                     │
-│  - Mini-oscilloscope temps réel sur les câbles (visualisation du son)  │
-└────────────────────────────────────────────────────────────────────────┘
-                                    │
-┌────────────────────────────────────────────────────────────────────────┐
-│                    AXE 4 : FORMATS & DISTRIBUTIONS                     │
-│  - Sélecteur de carte son & taille de buffer (64 à 512 samples)        │
-│  - Packages natifs (.deb, AppImage, .dmg, .msi)                        │
-│  - Export sous forme de plugin audio hôte (CLAP / VST3 via nih-plug)   │
-└────────────────────────────────────────────────────────────────────────┘
-```
+- 🚀 **Jalon 8 : Jouabilité Immédiate & MIDI (v0.2.0)**  
+  Entrée MIDI USB (`midir`), gestionnaire de voix monophonique (*Last/Low/High Note*, Legato), module `MidiIn` (Pitch $1\,\text{V/oct}$, Gate, Velocity, CC1) et clavier virtuel rétractable à l'écran.
+- 🔄 **Jalon 9 : Résilience du Graphe & Boucles de Feedback (v0.3.0)**  
+  Détection des *Back-Edges* par DFS 3 couleurs, insertion automatique de délai unitaire ($z^{-1}$) pour les modulations cycliques (FM cross-mod, feedback de filtre) et atténuation par câble (*Cable Amount*).
+- 🖥️ **Jalon 10 : Ergonomie Spatiale & Workflow Canvas (v0.4.0)**  
+  Navigation infinie Pan & Zoom, navigateur de modules contextuel (*Module Browser* au clic-droit avec recherche), sélection multiple et visualisation de signal sur les câbles.
+- 🎛️ **Jalon 11 : Expansion du Catalogue Modulaire (v0.5.0)**  
+  LFO multi-formes synchronisable, générateur de bruit (Noise), Sample & Hold, Stereo Delay synchronisé, Drive / Saturation non-linéaire, et modules Math/Logique.
+- ⏱️ **Jalon 12 : Transport & Séquençage (v0.6.0)**  
+  Moteur de transport interne BPM maître, Step Sequencer 8/16 pas, et diviseurs d'horloge (*Clock Divider*).
+- 🎹 **Jalon 13 : Moteur Polyphonique (v0.7.0)**  
+  Pool de voix DSP vectorisé (4 à 8 voix avec *voice stealing*) et sommation dynamique des voies polyphoniques vers le bus master.
+- 📦 **Jalon 14 : Distribution & Intégrations Externes (v1.0.0)**  
+  Panneau de réglage audio (carte son, buffer size 64-512), packaging natif (.deb, AppImage, .dmg, .msi) et portage en plugin audio (CLAP / VST3).
 
 ---
 
