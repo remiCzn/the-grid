@@ -2,6 +2,8 @@
 
 Ce document détaille la trajectoire de développement de **The Grid**. Les priorités sont articulées pour préserver l'intransigeance temps réel du moteur, améliorer l'ergonomie visuelle du patcher et étendre progressivement le potentiel sonore du synthétiseur.
 
+> 📚 **Documentation détaillée & tâches de dev atomiques :** Consultez le dossier [`docs/roadmap/`](docs/roadmap/README.md) pour les spécifications exhaustives et le détail tâche par tâche.
+
 ---
 
 ## 📌 État Actuel : Jalons 1 à 7 (v0.1.0 - Alpha Fondatrice) ✅
