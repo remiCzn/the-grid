@@ -1,0 +1,13 @@
+[package]
+name = "grid-engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+grid-core = { path = "../grid-core" }
+cpal = { workspace = true }
+rtrb = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }

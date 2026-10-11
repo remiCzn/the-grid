@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Grid</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="toolbar">
+        <span class="logo">THE GRID</span>
+        <div class="controls">
+          <button id="btn-power">Power</button>
+          <label>
+            Master:
+            <input type="range" id="master-gain" min="0" max="1" step="0.01" value="0.8" />
+          </label>
+        </div>
+      </header>
+      <main class="grid-container">
+        <canvas id="grid-canvas"></canvas>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

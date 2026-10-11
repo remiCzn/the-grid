@@ -1,0 +1,69 @@
+:root {
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+  background-color: #121316;
+  color: #e0e2e8;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+body, html, #app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.toolbar {
+  height: 44px;
+  background-color: #1a1c22;
+  border-bottom: 1px solid #282a32;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  user-select: none;
+}
+
+.logo {
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #ff5200; /* Bitwig Orange */
+  font-size: 14px;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+}
+
+.controls button {
+  background: #252833;
+  color: #fff;
+  border: 1px solid #363a48;
+  padding: 5px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.controls button.active {
+  background: #ff5200;
+  border-color: #ff5200;
+}
+
+.grid-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #0f1013;
+}
+
+#grid-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
