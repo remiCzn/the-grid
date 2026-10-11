@@ -1,4 +1,4 @@
-use crate::dsp::{Oscillator, StateVariableFilter, VcaGain, Waveform};
+use crate::dsp::{AdsrEnvelope, Oscillator, StateVariableFilter, VcaGain, Waveform};
 use crate::ringbuffer::EngineChannels;
 use grid_core::compiler::ExecutionPlan;
 use grid_core::message::{AudioCommand, TelemetryFrame};
@@ -16,6 +16,7 @@ struct DspSlot {
     osc: Oscillator,
     vca: VcaGain,
     svf: StateVariableFilter,
+    env: AdsrEnvelope,
     is_active: bool,
 }
 
@@ -27,6 +28,7 @@ impl DspSlot {
             osc: Oscillator::new(sample_rate),
             vca: VcaGain::new(),
             svf: StateVariableFilter::new(sample_rate),
+            env: AdsrEnvelope::new(sample_rate),
             is_active: false,
         }
     }
@@ -44,13 +46,9 @@ pub struct RealtimeAudioProcessor {
     pub sample_rate: f32,
     pub current_plan: Option<ExecutionPlan>,
 
-    // Scratch buffers préalloués statiquement (Zero-Alloc)
     scratch_buffers: [[f32; MAX_BLOCK_SIZE]; MAX_SCRATCH_BUFFERS],
-
-    // Pool préalloué de processeurs DSP
     dsp_slots: Vec<DspSlot>,
 
-    // Télémétrie et décimation
     frame_counter: u64,
     samples_since_last_telemetry: usize,
     telemetry_interval_samples: usize,
@@ -66,7 +64,6 @@ impl RealtimeAudioProcessor {
         let telemetry_fps = 60.0;
         let interval = (sample_rate / telemetry_fps).max(64.0) as usize;
 
-        // Préallocation des slots DSP dès la construction hors thread audio
         let mut dsp_slots = Vec::with_capacity(MAX_MODULE_SLOTS);
         for _ in 0..MAX_MODULE_SLOTS {
             dsp_slots.push(DspSlot::new(sample_rate));
@@ -91,14 +88,11 @@ impl RealtimeAudioProcessor {
         }
     }
 
-    /// Règle l'intervalle de décimation de la télémétrie
     pub fn set_telemetry_interval(&mut self, interval_samples: usize) {
         self.telemetry_interval_samples = interval_samples.max(1);
     }
 
-    /// Appelé lors de la réception d'un nouveau plan compilé
     fn apply_plan_to_slots(&mut self, plan: &ExecutionPlan) {
-        // Réinitialiser les slots existants sans réallouer
         for slot in &mut self.dsp_slots {
             slot.is_active = false;
         }
@@ -112,7 +106,6 @@ impl RealtimeAudioProcessor {
             slot.kind = step.kind;
             slot.is_active = true;
 
-            // Initialiser les paramètres du module
             match step.kind {
                 ModuleKind::Oscillator => {
                     let freq = step.initial_parameters.get(0).copied().unwrap_or(440.0);
@@ -123,6 +116,22 @@ impl RealtimeAudioProcessor {
                     let gain = step.initial_parameters.get(0).copied().unwrap_or(1.0);
                     slot.vca.set_gain(gain);
                 }
+                ModuleKind::Filter => {
+                    let cutoff = step.initial_parameters.get(0).copied().unwrap_or(1000.0);
+                    let res = step.initial_parameters.get(1).copied().unwrap_or(0.707);
+                    slot.svf.set_cutoff(cutoff);
+                    slot.svf.set_resonance(res);
+                }
+                ModuleKind::Envelope => {
+                    let a = step.initial_parameters.get(0).copied().unwrap_or(10.0);
+                    let d = step.initial_parameters.get(1).copied().unwrap_or(100.0);
+                    let s = step.initial_parameters.get(2).copied().unwrap_or(0.7);
+                    let r = step.initial_parameters.get(3).copied().unwrap_or(200.0);
+                    slot.env.set_attack(a);
+                    slot.env.set_decay(d);
+                    slot.env.set_sustain(s);
+                    slot.env.set_release(r);
+                }
                 ModuleKind::Constant => {}
                 ModuleKind::AudioOut => {
                     let gain = step.initial_parameters.get(0).copied().unwrap_or(0.8);
@@ -132,7 +141,6 @@ impl RealtimeAudioProcessor {
         }
     }
 
-    /// Met à jour la valeur d'un paramètre en temps réel sans allocation
     fn update_parameter(&mut self, module_id: u32, param_id: u32, value: f32) {
         for slot in &mut self.dsp_slots {
             if slot.is_active && slot.module_id == module_id {
@@ -147,6 +155,20 @@ impl RealtimeAudioProcessor {
                             slot.vca.set_gain(value);
                         }
                     }
+                    ModuleKind::Filter => {
+                        if param_id == 0 {
+                            slot.svf.set_cutoff(value);
+                        } else if param_id == 1 {
+                            slot.svf.set_resonance(value);
+                        }
+                    }
+                    ModuleKind::Envelope => match param_id {
+                        0 => slot.env.set_attack(value),
+                        1 => slot.env.set_decay(value),
+                        2 => slot.env.set_sustain(value),
+                        3 => slot.env.set_release(value),
+                        _ => {}
+                    },
                     ModuleKind::AudioOut => {
                         if param_id == 0 {
                             slot.vca.set_gain(value);
@@ -159,10 +181,8 @@ impl RealtimeAudioProcessor {
         }
     }
 
-    /// Traitement principal dans le callback audio CPAL (Zero-Alloc, Zero-Lock, Zero-IO)
     #[inline(always)]
     pub fn process_interleaved_buffer(&mut self, output: &mut [f32]) {
-        // 1. Dépilage non bloquant de toutes les commandes SPSC
         while let Ok(cmd) = self.channels.command_consumer.pop() {
             match cmd {
                 AudioCommand::SetPlaying(playing) => {
@@ -191,6 +211,7 @@ impl RealtimeAudioProcessor {
                     self.samples_since_last_telemetry = 0;
                     for slot in &mut self.dsp_slots {
                         slot.svf.reset();
+                        slot.env.reset();
                     }
                 }
             }
@@ -198,7 +219,6 @@ impl RealtimeAudioProcessor {
 
         let num_frames = (output.len() / 2).min(MAX_BLOCK_SIZE);
 
-        // 2. Si le moteur est arrêté : buffer muet
         if !self.is_playing || self.current_plan.is_none() {
             output.fill(0.0);
             for _ in 0..num_frames {
@@ -209,7 +229,6 @@ impl RealtimeAudioProcessor {
 
         let plan = self.current_plan.as_ref().unwrap();
 
-        // 3. Exécution séquentielle linéaire du plan DSP sans allocation
         let mut master_left_buf_idx: Option<usize> = None;
         let mut master_right_buf_idx: Option<usize> = None;
 
@@ -230,14 +249,37 @@ impl RealtimeAudioProcessor {
                         slot.osc.process_block(out_slice, None);
                     }
                 }
+                ModuleKind::Envelope => {
+                    if let Some(out_buf) = step.output_buffers.get(0) {
+                        let out_idx = (out_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
+                        let out_slice = &mut self.scratch_buffers[out_idx][..num_frames];
+                        slot.env.process_block(out_slice, None);
+                    }
+                }
+                ModuleKind::Filter => {
+                    if let (Some(in_buf), Some(out_buf)) =
+                        (step.input_buffers.get(0), step.output_buffers.get(0))
+                    {
+                        let in_idx = (in_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
+                        let out_idx = (out_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
+                        if in_idx != out_idx {
+                            let (in_slice, out_slice) = if in_idx < out_idx {
+                                let (left, right) = self.scratch_buffers.split_at_mut(out_idx);
+                                (&left[in_idx][..num_frames], &mut right[0][..num_frames])
+                            } else {
+                                let (left, right) = self.scratch_buffers.split_at_mut(in_idx);
+                                (&right[0][..num_frames], &mut left[out_idx][..num_frames])
+                            };
+                            slot.svf.process_block(in_slice, out_slice);
+                        }
+                    }
+                }
                 ModuleKind::Gain => {
                     if let (Some(in_buf), Some(out_buf)) =
                         (step.input_buffers.get(0), step.output_buffers.get(0))
                     {
                         let in_idx = (in_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
                         let out_idx = (out_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
-
-                        // Pour éviter le double emprunt mutable sur scratch_buffers
                         if in_idx != out_idx {
                             let (in_slice, out_slice) = if in_idx < out_idx {
                                 let (left, right) = self.scratch_buffers.split_at_mut(out_idx);
@@ -251,7 +293,6 @@ impl RealtimeAudioProcessor {
                     }
                 }
                 ModuleKind::AudioOut => {
-                    // Les entrées de MasterOut sont reliées au bus principal
                     if let Some(left_buf) = step.input_buffers.get(0) {
                         master_left_buf_idx = Some((left_buf.0 as usize) % MAX_SCRATCH_BUFFERS);
                     }
@@ -268,13 +309,11 @@ impl RealtimeAudioProcessor {
             }
         }
 
-        // 4. Écriture dans le buffer de sortie stéréo entrelacé et calcul des métriques
         for frame_idx in 0..num_frames {
             let left_in = master_left_buf_idx
                 .map(|idx| self.scratch_buffers[idx][frame_idx])
                 .unwrap_or(0.0);
 
-            // Si seule l'entrée gauche est connectée, dupliquer sur la droite (mono -> stéréo)
             let right_in = master_right_buf_idx
                 .map(|idx| self.scratch_buffers[idx][frame_idx])
                 .unwrap_or(left_in);
@@ -288,7 +327,6 @@ impl RealtimeAudioProcessor {
             self.accumulate_sample(out_l, out_r);
         }
 
-        // Zéro-padding si le buffer de sortie est plus grand que num_frames
         if output.len() > num_frames * 2 {
             output[num_frames * 2..].fill(0.0);
         }

@@ -166,3 +166,50 @@ if (masterGain) {
     }
   });
 }
+
+// Export / Import de Patch (.json / .grid)
+const btnSave = document.getElementById("btn-save") as HTMLButtonElement | null;
+const btnLoad = document.getElementById("btn-load") as HTMLButtonElement | null;
+const fileInput = document.getElementById("file-input") as HTMLInputElement | null;
+
+if (btnSave) {
+  btnSave.addEventListener("click", async () => {
+    try {
+      const jsonStr = (await invoke("export_patch")) as string;
+      const blob = new Blob([jsonStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${currentPatch.name.toLowerCase().replace(/\s+/g, "-")}.grid.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Erreur export patch:", err);
+    }
+  });
+}
+
+if (btnLoad && fileInput) {
+  btnLoad.addEventListener("click", () => {
+    fileInput.click();
+  });
+
+  fileInput.addEventListener("change", async (e) => {
+    const file = (e.target as HTMLInputElement).files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const loadedPatch = (await invoke("import_patch", { jsonStr: text })) as Patch;
+      // Remplacer le patch en mémoire
+      currentPatch.name = loadedPatch.name;
+      currentPatch.modules = loadedPatch.modules;
+      currentPatch.cables = loadedPatch.cables;
+      console.log("Patch chargé avec succès:", currentPatch.name);
+    } catch (err) {
+      console.error("Erreur import patch:", err);
+      alert(`Erreur d'importation du patch: ${err}`);
+    }
+    fileInput.value = "";
+  });
+}

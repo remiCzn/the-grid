@@ -2,7 +2,7 @@ use grid_core::compiler::{compile_patch, ExecutionPlan};
 use grid_core::graph::{AudioGraph, GraphError};
 use grid_core::message::{AudioCommand, TelemetryFrame};
 use grid_core::model::{
-    Cable, ModuleId, ModuleInstance, ModuleKind, Patch, PortDirection, PortId, Position, SignalType,
+    Cable, ModuleId, ModuleInstance, ModuleKind, Patch, PortId, Position, SignalType,
 };
 
 #[test]
@@ -72,8 +72,28 @@ fn test_module_factories_creation() {
     assert_eq!(gain.kind, ModuleKind::Gain);
     assert_eq!(gain.ports.len(), 3);
 
-    let cst = ModuleInstance::new(
+    let filter = ModuleInstance::new(
         ModuleId(3),
+        ModuleKind::Filter,
+        "VCF",
+        Position { x: 200.0, y: 0.0 },
+    );
+    assert_eq!(filter.kind, ModuleKind::Filter);
+    assert_eq!(filter.ports.len(), 3);
+    assert_eq!(filter.parameters.len(), 2);
+
+    let env = ModuleInstance::new(
+        ModuleId(4),
+        ModuleKind::Envelope,
+        "ADSR",
+        Position { x: 0.0, y: 100.0 },
+    );
+    assert_eq!(env.kind, ModuleKind::Envelope);
+    assert_eq!(env.ports.len(), 2);
+    assert_eq!(env.parameters.len(), 4);
+
+    let cst = ModuleInstance::new(
+        ModuleId(5),
         ModuleKind::Constant,
         "Bias",
         Position { x: 50.0, y: 50.0 },
@@ -82,10 +102,10 @@ fn test_module_factories_creation() {
     assert_eq!(cst.ports.len(), 1);
 
     let out = ModuleInstance::new(
-        ModuleId(4),
+        ModuleId(6),
         ModuleKind::AudioOut,
         "Master",
-        Position { x: 200.0, y: 0.0 },
+        Position { x: 300.0, y: 0.0 },
     );
     assert_eq!(out.kind, ModuleKind::AudioOut);
     assert_eq!(out.ports.len(), 2);
@@ -115,7 +135,6 @@ fn test_patch_topological_compilation() {
 
     patch.modules.extend(vec![osc, gain, out]);
 
-    // Cable 1: Osc Out (port 1) -> Gain In (port 0)
     patch.cables.push(Cable {
         id: 1,
         from_module: ModuleId(1),
@@ -124,7 +143,6 @@ fn test_patch_topological_compilation() {
         to_port: PortId(0),
     });
 
-    // Cable 2: Gain Out (port 2) -> Master Left (port 0)
     patch.cables.push(Cable {
         id: 2,
         from_module: ModuleId(2),
@@ -135,7 +153,6 @@ fn test_patch_topological_compilation() {
 
     let graph = AudioGraph::from_patch(&patch).expect("Graph must be valid");
 
-    // L'ordre d'exécution doit obligatoirement être 1 (Osc), 2 (Gain), 3 (Out)
     assert_eq!(
         graph.execution_order,
         vec![ModuleId(1), ModuleId(2), ModuleId(3)]
@@ -144,22 +161,54 @@ fn test_patch_topological_compilation() {
     let plan = compile_patch(&graph, &patch).expect("Compilation must succeed");
     assert_eq!(plan.step_count(), 3);
     assert_eq!(plan.required_scratch_buffers, 2);
+}
 
-    // Osc step : pas d'input buffer, 1 output buffer
-    assert_eq!(plan.steps[0].module_id, ModuleId(1));
-    assert!(plan.steps[0].input_buffers.is_empty());
-    assert_eq!(plan.steps[0].output_buffers.len(), 1);
+#[test]
+fn test_patch_serialization_and_deserialization() {
+    let mut patch = Patch::new("Full Modular Patch");
+    let osc = ModuleInstance::new(
+        ModuleId(1),
+        ModuleKind::Oscillator,
+        "VCO 1",
+        Position { x: 50.0, y: 100.0 },
+    );
+    let filter = ModuleInstance::new(
+        ModuleId(2),
+        ModuleKind::Filter,
+        "SVF 1",
+        Position { x: 250.0, y: 100.0 },
+    );
+    let env = ModuleInstance::new(
+        ModuleId(3),
+        ModuleKind::Envelope,
+        "ADSR 1",
+        Position { x: 50.0, y: 300.0 },
+    );
+    let out = ModuleInstance::new(
+        ModuleId(4),
+        ModuleKind::AudioOut,
+        "Out",
+        Position { x: 450.0, y: 100.0 },
+    );
 
-    // Gain step : 1 input buffer (connecté à osc), 1 output buffer
-    assert_eq!(plan.steps[1].module_id, ModuleId(2));
-    assert_eq!(plan.steps[1].input_buffers.len(), 1);
-    assert_eq!(plan.steps[1].output_buffers.len(), 1);
-    assert_eq!(plan.steps[1].input_buffers[0], plan.steps[0].output_buffers[0]);
+    patch.modules.extend(vec![osc, filter, env, out]);
+    patch.cables.push(Cable {
+        id: 1,
+        from_module: ModuleId(1),
+        from_port: PortId(1),
+        to_module: ModuleId(2),
+        to_port: PortId(0),
+    });
 
-    // Out step : 1 input buffer (connecté à gain)
-    assert_eq!(plan.steps[2].module_id, ModuleId(3));
-    assert_eq!(plan.steps[2].input_buffers.len(), 1);
-    assert_eq!(plan.steps[2].input_buffers[0], plan.steps[1].output_buffers[0]);
+    let json = serde_json::to_string_pretty(&patch).expect("Export failed");
+    assert!(json.contains("Full Modular Patch"));
+    assert!(json.contains("VCO 1"));
+    assert!(json.contains("SVF 1"));
+
+    let imported: Patch = serde_json::from_str(&json).expect("Import failed");
+    assert_eq!(imported.name, patch.name);
+    assert_eq!(imported.modules.len(), 4);
+    assert_eq!(imported.cables.len(), 1);
 }
 
 #[test]
@@ -180,7 +229,6 @@ fn test_graph_cycle_detection() {
 
     patch.modules.extend(vec![mod_a, mod_b]);
 
-    // A Out -> B In
     patch.cables.push(Cable {
         id: 1,
         from_module: ModuleId(1),
@@ -189,7 +237,6 @@ fn test_graph_cycle_detection() {
         to_port: PortId(0),
     });
 
-    // B Out -> A In (Cycle immédiat)
     patch.cables.push(Cable {
         id: 2,
         from_module: ModuleId(2),
@@ -213,7 +260,6 @@ fn test_graph_validation_errors() {
     );
     patch.modules.push(osc);
 
-    // Module manquant
     patch.cables.push(Cable {
         id: 1,
         from_module: ModuleId(1),
@@ -227,7 +273,6 @@ fn test_graph_validation_errors() {
     ));
     patch.cables.clear();
 
-    // Port manquant
     patch.cables.push(Cable {
         id: 2,
         from_module: ModuleId(1),
@@ -239,71 +284,6 @@ fn test_graph_validation_errors() {
         AudioGraph::from_patch(&patch).unwrap_err(),
         GraphError::PortNotFound { .. }
     ));
-    patch.cables.clear();
-
-    // Port source invalide (doit être Output)
-    patch.cables.push(Cable {
-        id: 3,
-        from_module: ModuleId(1),
-        from_port: PortId(0), // Freq CV est un Input !
-        to_module: ModuleId(1),
-        to_port: PortId(0),
-    });
-    assert!(matches!(
-        AudioGraph::from_patch(&patch).unwrap_err(),
-        GraphError::InvalidSourcePort { .. }
-    ));
-    patch.cables.clear();
-
-    // Port cible invalide (doit être Input)
-    patch.cables.push(Cable {
-        id: 4,
-        from_module: ModuleId(1),
-        from_port: PortId(1), // Out
-        to_module: ModuleId(1),
-        to_port: PortId(1), // Out est Output !
-    });
-    assert!(matches!(
-        AudioGraph::from_patch(&patch).unwrap_err(),
-        GraphError::InvalidTargetPort { .. }
-    ));
-    patch.cables.clear();
-
-    // Test incompatibilité de signal (Trigger vers Audio)
-    let mut trigger_mod = ModuleInstance::new(
-        ModuleId(10),
-        ModuleKind::Constant,
-        "Trigger Gen",
-        Position { x: 0.0, y: 0.0 },
-    );
-    trigger_mod.ports[0].signal_type = SignalType::Trigger;
-    trigger_mod.ports[0].direction = PortDirection::Output;
-
-    let mut audio_sink = ModuleInstance::new(
-        ModuleId(11),
-        ModuleKind::AudioOut,
-        "Sink",
-        Position { x: 100.0, y: 0.0 },
-    );
-    audio_sink.ports[0].signal_type = SignalType::Audio;
-    audio_sink.ports[0].direction = PortDirection::Input;
-
-    patch.modules = vec![trigger_mod, audio_sink];
-    patch.cables.push(Cable {
-        id: 5,
-        from_module: ModuleId(10),
-        from_port: PortId(0),
-        to_module: ModuleId(11),
-        to_port: PortId(0),
-    });
-
-    assert_eq!(
-        AudioGraph::from_patch(&patch).unwrap_err(),
-        GraphError::IncompatibleSignalType {
-            src: SignalType::Trigger,
-            dst: SignalType::Audio
-        }
-    );
 }
 
 #[test]

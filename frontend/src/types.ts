@@ -7,7 +7,13 @@ export interface Position {
 
 export type SignalType = "Audio" | "ControlVoltage" | "Trigger";
 export type PortDirection = "Input" | "Output";
-export type ModuleKind = "Oscillator" | "Gain" | "Constant" | "AudioOut";
+export type ModuleKind =
+  | "Oscillator"
+  | "Gain"
+  | "Constant"
+  | "Filter"
+  | "Envelope"
+  | "AudioOut";
 
 export interface PortDefinition {
   id: number;

@@ -2,7 +2,6 @@ use grid_app::state::AppState;
 use grid_app::telemetry::TelemetryRelay;
 use grid_core::message::AudioCommand;
 use grid_core::model::Patch;
-use std::sync::Arc;
 
 #[test]
 fn test_app_state_initial_state() {
@@ -11,7 +10,6 @@ fn test_app_state_initial_state() {
     assert!(state.current_patch.lock().unwrap().is_none());
     assert!(state.driver.lock().unwrap().is_none());
 
-    // Tentative d'envoi avant initialisation : doit échouer proprement
     let res = state.send_audio_command(AudioCommand::SetPlaying(true));
     assert_eq!(res.unwrap_err(), "Moteur audio non initialisé");
 }
@@ -31,6 +29,5 @@ fn test_app_state_apply_patch() {
 #[test]
 fn test_telemetry_relay_lifecycle() {
     let relay = TelemetryRelay::new();
-    // Test arrêt alors qu'il n'est pas démarré
     relay.stop();
 }

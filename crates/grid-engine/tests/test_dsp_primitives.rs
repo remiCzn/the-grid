@@ -1,4 +1,6 @@
-use grid_engine::dsp::{FilterMode, Oscillator, StateVariableFilter, VcaGain, Waveform};
+use grid_engine::dsp::{
+    AdsrEnvelope, EnvelopeStage, FilterMode, Oscillator, StateVariableFilter, VcaGain, Waveform,
+};
 
 #[test]
 fn test_oscillator_waveforms_and_frequency() {
@@ -85,4 +87,54 @@ fn test_svf_filter_stability_and_all_modes() {
             assert!(!s.is_infinite(), "Filtre ne doit pas produire d'Inf");
         }
     }
+}
+
+#[test]
+fn test_adsr_envelope_lifecycle() {
+    let mut env = AdsrEnvelope::new(48000.0);
+    env.set_attack(2.0); // 2 ms
+    env.set_decay(5.0); // 5 ms
+    env.set_sustain(0.5);
+    env.set_release(10.0); // 10 ms
+
+    assert_eq!(env.stage, EnvelopeStage::Idle);
+    assert_eq!(env.process_sample(0.0), 0.0);
+
+    // 1. Déclenchement Gate ON -> Attack
+    env.gate_on();
+    assert_eq!(env.stage, EnvelopeStage::Attack);
+
+    // Faire avancer les échantillons pour terminer l'attaque
+    for _ in 0..150 {
+        env.process_sample(1.0);
+    }
+    // Doit être passé en Decay ou Sustain
+    assert!(
+        env.stage == EnvelopeStage::Decay || env.stage == EnvelopeStage::Sustain,
+        "L'étape doit être Decay ou Sustain, trouvée: {:?}",
+        env.stage
+    );
+
+    // Avancer jusqu'au Sustain
+    for _ in 0..300 {
+        env.process_sample(1.0);
+    }
+    assert_eq!(env.stage, EnvelopeStage::Sustain);
+    assert!((env.current_value - 0.5).abs() < 0.05);
+
+    // 2. Relâchement Gate OFF -> Release
+    env.gate_off();
+    assert_eq!(env.stage, EnvelopeStage::Release);
+
+    // Avancer jusqu'à la fin de la release
+    for _ in 0..600 {
+        env.process_sample(0.0);
+    }
+    assert_eq!(env.stage, EnvelopeStage::Idle);
+    assert_eq!(env.current_value, 0.0);
+
+    // Test reset
+    env.gate_on();
+    env.reset();
+    assert_eq!(env.stage, EnvelopeStage::Idle);
 }

@@ -1,8 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use grid_app::commands::{
-    apply_patch, get_current_patch, init_audio, set_master_gain, set_parameter, start_audio,
-    stop_audio,
+    apply_patch, export_patch, get_current_patch, import_patch, init_audio, set_master_gain,
+    set_parameter, start_audio, stop_audio,
 };
 use grid_app::state::AppState;
 use std::sync::Arc;
@@ -19,7 +19,9 @@ fn main() {
             set_master_gain,
             set_parameter,
             apply_patch,
-            get_current_patch
+            get_current_patch,
+            export_patch,
+            import_patch
         ])
         .run(tauri::generate_context!())
         .expect("Erreur lors de l'exécution de l'application Tauri");

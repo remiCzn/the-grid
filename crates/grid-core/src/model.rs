@@ -45,6 +45,8 @@ pub enum ModuleKind {
     Oscillator,
     Gain,
     Constant,
+    Filter,
+    Envelope,
     AudioOut,
 }
 
@@ -149,6 +151,104 @@ impl ModuleInstance {
                     default_value: 0.0,
                     current_value: 0.0,
                 }],
+            },
+            ModuleKind::Filter => Self {
+                id,
+                kind,
+                name: name.to_string(),
+                position,
+                ports: vec![
+                    PortDefinition {
+                        id: PortId(0),
+                        name: "In".to_string(),
+                        signal_type: SignalType::Audio,
+                        direction: PortDirection::Input,
+                    },
+                    PortDefinition {
+                        id: PortId(1),
+                        name: "Cutoff CV".to_string(),
+                        signal_type: SignalType::ControlVoltage,
+                        direction: PortDirection::Input,
+                    },
+                    PortDefinition {
+                        id: PortId(2),
+                        name: "Out".to_string(),
+                        signal_type: SignalType::Audio,
+                        direction: PortDirection::Output,
+                    },
+                ],
+                parameters: vec![
+                    ParameterDefinition {
+                        id: ParamId(0),
+                        name: "Cutoff".to_string(),
+                        min: 20.0,
+                        max: 20000.0,
+                        default_value: 1000.0,
+                        current_value: 1000.0,
+                    },
+                    ParameterDefinition {
+                        id: ParamId(1),
+                        name: "Resonance".to_string(),
+                        min: 0.1,
+                        max: 10.0,
+                        default_value: 0.707,
+                        current_value: 0.707,
+                    },
+                ],
+            },
+            ModuleKind::Envelope => Self {
+                id,
+                kind,
+                name: name.to_string(),
+                position,
+                ports: vec![
+                    PortDefinition {
+                        id: PortId(0),
+                        name: "Gate".to_string(),
+                        signal_type: SignalType::Trigger,
+                        direction: PortDirection::Input,
+                    },
+                    PortDefinition {
+                        id: PortId(1),
+                        name: "Env Out".to_string(),
+                        signal_type: SignalType::ControlVoltage,
+                        direction: PortDirection::Output,
+                    },
+                ],
+                parameters: vec![
+                    ParameterDefinition {
+                        id: ParamId(0),
+                        name: "Attack".to_string(),
+                        min: 1.0,
+                        max: 2000.0,
+                        default_value: 10.0,
+                        current_value: 10.0,
+                    },
+                    ParameterDefinition {
+                        id: ParamId(1),
+                        name: "Decay".to_string(),
+                        min: 1.0,
+                        max: 2000.0,
+                        default_value: 100.0,
+                        current_value: 100.0,
+                    },
+                    ParameterDefinition {
+                        id: ParamId(2),
+                        name: "Sustain".to_string(),
+                        min: 0.0,
+                        max: 1.0,
+                        default_value: 0.7,
+                        current_value: 0.7,
+                    },
+                    ParameterDefinition {
+                        id: ParamId(3),
+                        name: "Release".to_string(),
+                        min: 1.0,
+                        max: 5000.0,
+                        default_value: 200.0,
+                        current_value: 200.0,
+                    },
+                ],
             },
             ModuleKind::AudioOut => Self {
                 id,
