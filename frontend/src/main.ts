@@ -188,15 +188,151 @@ if (canvas) {
 
   function draw() {
     if (!ctx || !canvas) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Fond sombre
     ctx.fillStyle = "#121316";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Dessin de la grille de points (Grid dots)
-    ctx.fillStyle = "#262933";
-    const step = 32;
+    // Grille de points
+    ctx.fillStyle = "#222530";
+    const step = 28;
     for (let x = step; x < canvas.width; x += step) {
       for (let y = step; y < canvas.height; y += step) {
-        ctx.fillRect(x, y, 2, 2);
+        ctx.beginPath();
+        ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    const modWidth = 170;
+    const modHeight = 150;
+
+    // Helper pour trouver les coordonnées d'un port
+    function getPortCoords(modId: number, portId: number): { x: number; y: number; type: string } | null {
+      const mod = defaultPatch.modules.find((m) => m.id === modId);
+      if (!mod) return null;
+      const portIndex = mod.ports.findIndex((p) => p.id === portId);
+      if (portIndex === -1) return null;
+      const port = mod.ports[portIndex];
+      const isInput = port.direction === "Input";
+
+      const idxWithinGroup = isInput
+        ? mod.ports.filter((p) => p.direction === "Input").indexOf(port)
+        : mod.ports.filter((p) => p.direction === "Output").indexOf(port);
+
+      const spacing = 28;
+      const startY = mod.position.y + 60;
+      const py = startY + idxWithinGroup * spacing;
+      const px = isInput ? mod.position.x : mod.position.x + modWidth;
+
+      return { x: px, y: py, type: port.signal_type };
+    }
+
+    // 1. Dessin des câbles (Courbes de Bézier cubiques)
+    for (const cable of defaultPatch.cables) {
+      const pFrom = getPortCoords(cable.from_module, cable.from_port);
+      const pTo = getPortCoords(cable.to_module, cable.to_port);
+      if (!pFrom || !pTo) continue;
+
+      ctx.beginPath();
+      ctx.moveTo(pFrom.x, pFrom.y);
+
+      const dx = Math.abs(pTo.x - pFrom.x) * 0.5 + 40;
+      ctx.bezierCurveTo(pFrom.x + dx, pFrom.y, pTo.x - dx, pTo.y, pTo.x, pTo.y);
+
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = pFrom.type === "Audio" ? "#ff5200" : "#00a8ff";
+      ctx.lineCap = "round";
+      ctx.stroke();
+
+      // Halo lumineux subtil
+      ctx.lineWidth = 7;
+      ctx.strokeStyle = pFrom.type === "Audio" ? "rgba(255, 82, 0, 0.15)" : "rgba(0, 168, 255, 0.15)";
+      ctx.stroke();
+    }
+
+    // 2. Dessin des modules
+    for (const mod of defaultPatch.modules) {
+      const mx = mod.position.x;
+      const my = mod.position.y;
+
+      // Ombre du module
+      ctx.shadowColor = "rgba(0, 0, 0, 0.4)";
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 6;
+
+      // Carte du module
+      ctx.fillStyle = "#1e2029";
+      ctx.beginPath();
+      ctx.roundRect(mx, my, modWidth, modHeight, 8);
+      ctx.fill();
+
+      // Bordure
+      ctx.shadowColor = "transparent";
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "#303444";
+      ctx.stroke();
+
+      // En-tête du module
+      ctx.fillStyle = "#272a36";
+      ctx.beginPath();
+      ctx.roundRect(mx, my, modWidth, 32, [8, 8, 0, 0]);
+      ctx.fill();
+
+      // Badge type
+      ctx.fillStyle = "#ff5200";
+      ctx.fillRect(mx + 10, my + 11, 4, 11);
+
+      // Titre
+      ctx.fillStyle = "#f0f2f8";
+      ctx.font = "bold 12px Inter, sans-serif";
+      ctx.fillText(mod.name, mx + 20, my + 20);
+
+      // Paramètre (potentiomètre / affichage slider)
+      if (mod.parameters.length > 0) {
+        const param = mod.parameters[0];
+        ctx.fillStyle = "#8a8f9f";
+        ctx.font = "11px Inter, sans-serif";
+        ctx.fillText(param.name, mx + 16, my + 120);
+
+        ctx.fillStyle = "#4a4f62";
+        ctx.fillRect(mx + 16, my + 128, modWidth - 32, 6);
+        ctx.fillStyle = "#ff5200";
+        const fillW = ((param.current_value - param.min) / (param.max - param.min)) * (modWidth - 32);
+        ctx.fillRect(mx + 16, my + 128, Math.max(4, fillW), 6);
+      }
+
+      // Dessin des ports
+      for (const port of mod.ports) {
+        const coords = getPortCoords(mod.id, port.id);
+        if (!coords) continue;
+
+        // Anneau extérieur du port
+        ctx.beginPath();
+        ctx.arc(coords.x, coords.y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = "#161820";
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = port.signal_type === "Audio" ? "#ff5200" : port.signal_type === "ControlVoltage" ? "#00a8ff" : "#ffd32a";
+        ctx.stroke();
+
+        // Broche intérieure
+        ctx.beginPath();
+        ctx.arc(coords.x, coords.y, 2.5, 0, Math.PI * 2);
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.fill();
+
+        // Label du port
+        ctx.fillStyle = "#73788b";
+        ctx.font = "10px Inter, sans-serif";
+        if (port.direction === "Input") {
+          ctx.fillText(port.name, coords.x + 10, coords.y + 3);
+        } else {
+          const w = ctx.measureText(port.name).width;
+          ctx.fillText(port.name, coords.x - w - 10, coords.y + 3);
+        }
       }
     }
   }
