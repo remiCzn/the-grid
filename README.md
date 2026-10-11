@@ -6,9 +6,11 @@ Un clone modulaire type Bitwig « The Grid » associant un frontend Tauri v2 (Ca
 
 ## Documentation de Référence
 
-- 📜 **[Règles et Directives Architecturales](file:///home/freebox/the-grid/GUIDELINES.md)** : Règles d'or temps réel (`no malloc`, `no mutex`, `no I/O`), protocole de communication SPSC, et registre de couverture des tests.
-- 📐 **[Spécifications Techniques et Fonctionnelles](file:///home/freebox/the-grid/SPECIFICATIONS.md)** : Modèle de patch JSON, typologie des signaux (Audio, CV, Trigger), validation DAG du graphe, commandes IPC Tauri et dimensionnement des files.
-- 🗺️ **[Feuille de Route (Roadmap)](file:///home/freebox/the-grid/ROADMAP.md)** : Étapes d'implémentation, livrables terminés et jalons futurs.
+- 📄 **[Résumé Exécutif du Projet (`PROJECT_SUMMARY.md`)](PROJECT_SUMMARY.md)** : Synthèse globale d'architecture, état d'avancement et perspectives d'évolution (idéal pour partage).
+- 📜 **[Règles et Directives Architecturales](GUIDELINES.md)** : Règles d'or temps réel (`no malloc`, `no mutex`, `no I/O`), protocole de communication SPSC, et registre de couverture des tests.
+- 📐 **[Spécifications Techniques et Fonctionnelles](SPECIFICATIONS.md)** : Modèle de patch JSON, typologie des signaux (Audio, CV, Trigger), validation DAG du graphe, commandes IPC Tauri et dimensionnement des files.
+- 🗺️ **[Feuille de Route (Roadmap)](ROADMAP.md)** : Étapes d'implémentation, livrables terminés et jalons futurs.
+- 🖼️ **[Prévisualisation du Rendu Visuel (`FRONTEND_PREVIEW.md`)](FRONTEND_PREVIEW.md)** : Capture d'écran native du frontend.
 
 ---
 
