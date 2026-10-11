@@ -1,18 +1,54 @@
+use crate::dsp::{Oscillator, StateVariableFilter, VcaGain, Waveform};
 use crate::ringbuffer::EngineChannels;
 use grid_core::compiler::ExecutionPlan;
 use grid_core::message::{AudioCommand, TelemetryFrame};
+use grid_core::model::ModuleKind;
+
+pub const MAX_SCRATCH_BUFFERS: usize = 16;
+pub const MAX_BLOCK_SIZE: usize = 1024;
+pub const MAX_MODULE_SLOTS: usize = 32;
+
+/// Emplacement DSP préalloué pour un module actif du graphe
+#[derive(Debug, Clone)]
+struct DspSlot {
+    module_id: u32,
+    kind: ModuleKind,
+    osc: Oscillator,
+    vca: VcaGain,
+    svf: StateVariableFilter,
+    is_active: bool,
+}
+
+impl DspSlot {
+    fn new(sample_rate: f32) -> Self {
+        Self {
+            module_id: 0,
+            kind: ModuleKind::Oscillator,
+            osc: Oscillator::new(sample_rate),
+            vca: VcaGain::new(),
+            svf: StateVariableFilter::new(sample_rate),
+            is_active: false,
+        }
+    }
+}
 
 /// Contexte d'exécution temps réel vivant sur le thread audio.
-/// Respecte strictement les règles d'or temps réel :
-/// - Aucune allocation dynamique de mémoire (no malloc).
-/// - Aucun verrouillage bloquant (no mutex).
-/// - Aucun appel système ou I/O direct.
+/// Strictement conforme aux règles d'or temps réel :
+/// - Zéro allocation dynamique de mémoire (no malloc).
+/// - Zéro verrouillage bloquant (no mutex).
+/// - Zéro appel système ou I/O direct.
 pub struct RealtimeAudioProcessor {
     pub channels: EngineChannels,
     pub is_playing: bool,
     pub master_gain: f32,
     pub sample_rate: f32,
     pub current_plan: Option<ExecutionPlan>,
+
+    // Scratch buffers préalloués statiquement (Zero-Alloc)
+    scratch_buffers: [[f32; MAX_BLOCK_SIZE]; MAX_SCRATCH_BUFFERS],
+
+    // Pool préalloué de processeurs DSP
+    dsp_slots: Vec<DspSlot>,
 
     // Télémétrie et décimation
     frame_counter: u64,
@@ -27,9 +63,14 @@ pub struct RealtimeAudioProcessor {
 
 impl RealtimeAudioProcessor {
     pub fn new(channels: EngineChannels, sample_rate: f32) -> Self {
-        // Fréquence cible de télémétrie par défaut : 60 Hz
         let telemetry_fps = 60.0;
         let interval = (sample_rate / telemetry_fps).max(64.0) as usize;
+
+        // Préallocation des slots DSP dès la construction hors thread audio
+        let mut dsp_slots = Vec::with_capacity(MAX_MODULE_SLOTS);
+        for _ in 0..MAX_MODULE_SLOTS {
+            dsp_slots.push(DspSlot::new(sample_rate));
+        }
 
         Self {
             channels,
@@ -37,6 +78,8 @@ impl RealtimeAudioProcessor {
             master_gain: 0.8,
             sample_rate,
             current_plan: None,
+            scratch_buffers: [[0.0f32; MAX_BLOCK_SIZE]; MAX_SCRATCH_BUFFERS],
+            dsp_slots,
             frame_counter: 0,
             samples_since_last_telemetry: 0,
             telemetry_interval_samples: interval,
@@ -48,16 +91,78 @@ impl RealtimeAudioProcessor {
         }
     }
 
-    /// Règle l'intervalle d'échantillons entre deux émissions de télémétrie (décimation)
+    /// Règle l'intervalle de décimation de la télémétrie
     pub fn set_telemetry_interval(&mut self, interval_samples: usize) {
         self.telemetry_interval_samples = interval_samples.max(1);
     }
 
-    /// Traitement principal exécuté au sein du callback audio.
-    /// `output` est le buffer entrelacé (interleaved stereo : L, R, L, R, ...).
+    /// Appelé lors de la réception d'un nouveau plan compilé
+    fn apply_plan_to_slots(&mut self, plan: &ExecutionPlan) {
+        // Réinitialiser les slots existants sans réallouer
+        for slot in &mut self.dsp_slots {
+            slot.is_active = false;
+        }
+
+        for (i, step) in plan.steps.iter().enumerate() {
+            if i >= self.dsp_slots.len() {
+                break;
+            }
+            let slot = &mut self.dsp_slots[i];
+            slot.module_id = step.module_id.0;
+            slot.kind = step.kind;
+            slot.is_active = true;
+
+            // Initialiser les paramètres du module
+            match step.kind {
+                ModuleKind::Oscillator => {
+                    let freq = step.initial_parameters.get(0).copied().unwrap_or(440.0);
+                    slot.osc.set_frequency(freq);
+                    slot.osc.waveform = Waveform::Sawtooth;
+                }
+                ModuleKind::Gain => {
+                    let gain = step.initial_parameters.get(0).copied().unwrap_or(1.0);
+                    slot.vca.set_gain(gain);
+                }
+                ModuleKind::Constant => {}
+                ModuleKind::AudioOut => {
+                    let gain = step.initial_parameters.get(0).copied().unwrap_or(0.8);
+                    slot.vca.set_gain(gain);
+                }
+            }
+        }
+    }
+
+    /// Met à jour la valeur d'un paramètre en temps réel sans allocation
+    fn update_parameter(&mut self, module_id: u32, param_id: u32, value: f32) {
+        for slot in &mut self.dsp_slots {
+            if slot.is_active && slot.module_id == module_id {
+                match slot.kind {
+                    ModuleKind::Oscillator => {
+                        if param_id == 0 {
+                            slot.osc.set_frequency(value);
+                        }
+                    }
+                    ModuleKind::Gain => {
+                        if param_id == 0 {
+                            slot.vca.set_gain(value);
+                        }
+                    }
+                    ModuleKind::AudioOut => {
+                        if param_id == 0 {
+                            slot.vca.set_gain(value);
+                        }
+                    }
+                    ModuleKind::Constant => {}
+                }
+                break;
+            }
+        }
+    }
+
+    /// Traitement principal dans le callback audio CPAL (Zero-Alloc, Zero-Lock, Zero-IO)
     #[inline(always)]
     pub fn process_interleaved_buffer(&mut self, output: &mut [f32]) {
-        // 1. Dépilage non bloquant de toutes les commandes disponibles
+        // 1. Dépilage non bloquant de toutes les commandes SPSC
         while let Ok(cmd) = self.channels.command_consumer.pop() {
             match cmd {
                 AudioCommand::SetPlaying(playing) => {
@@ -66,8 +171,15 @@ impl RealtimeAudioProcessor {
                 AudioCommand::SetMasterGain(gain) => {
                     self.master_gain = gain.clamp(0.0, 2.0);
                 }
-                AudioCommand::SetParameter { .. } => {}
+                AudioCommand::SetParameter {
+                    module_id,
+                    param_id,
+                    value,
+                } => {
+                    self.update_parameter(module_id, param_id, value);
+                }
                 AudioCommand::LoadExecutionPlan(plan) => {
+                    self.apply_plan_to_slots(&plan);
                     self.current_plan = Some(plan);
                 }
                 AudioCommand::Reset => {
@@ -77,28 +189,108 @@ impl RealtimeAudioProcessor {
                     self.current_sum_sq_r = 0.0;
                     self.sample_accum_count = 0;
                     self.samples_since_last_telemetry = 0;
+                    for slot in &mut self.dsp_slots {
+                        slot.svf.reset();
+                    }
                 }
             }
         }
 
-        // 2. Traitement des frames audio
-        if !self.is_playing {
+        let num_frames = (output.len() / 2).min(MAX_BLOCK_SIZE);
+
+        // 2. Si le moteur est arrêté : buffer muet
+        if !self.is_playing || self.current_plan.is_none() {
             output.fill(0.0);
-            for _ in 0..(output.len() / 2) {
+            for _ in 0..num_frames {
                 self.accumulate_sample(0.0, 0.0);
             }
             return;
         }
 
-        // Mode lecture : calcul frame par frame sans allocation
-        for frame in output.chunks_exact_mut(2) {
-            let left_sample = 0.0 * self.master_gain;
-            let right_sample = 0.0 * self.master_gain;
+        let plan = self.current_plan.as_ref().unwrap();
 
-            frame[0] = left_sample;
-            frame[1] = right_sample;
+        // 3. Exécution séquentielle linéaire du plan DSP sans allocation
+        let mut master_left_buf_idx: Option<usize> = None;
+        let mut master_right_buf_idx: Option<usize> = None;
 
-            self.accumulate_sample(left_sample, right_sample);
+        for (step_idx, step) in plan.steps.iter().enumerate() {
+            if step_idx >= self.dsp_slots.len() {
+                break;
+            }
+            let slot = &mut self.dsp_slots[step_idx];
+            if !slot.is_active {
+                continue;
+            }
+
+            match slot.kind {
+                ModuleKind::Oscillator => {
+                    if let Some(out_buf) = step.output_buffers.get(0) {
+                        let out_idx = (out_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
+                        let out_slice = &mut self.scratch_buffers[out_idx][..num_frames];
+                        slot.osc.process_block(out_slice, None);
+                    }
+                }
+                ModuleKind::Gain => {
+                    if let (Some(in_buf), Some(out_buf)) =
+                        (step.input_buffers.get(0), step.output_buffers.get(0))
+                    {
+                        let in_idx = (in_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
+                        let out_idx = (out_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
+
+                        // Pour éviter le double emprunt mutable sur scratch_buffers
+                        if in_idx != out_idx {
+                            let (in_slice, out_slice) = if in_idx < out_idx {
+                                let (left, right) = self.scratch_buffers.split_at_mut(out_idx);
+                                (&left[in_idx][..num_frames], &mut right[0][..num_frames])
+                            } else {
+                                let (left, right) = self.scratch_buffers.split_at_mut(in_idx);
+                                (&right[0][..num_frames], &mut left[out_idx][..num_frames])
+                            };
+                            slot.vca.process_block(in_slice, out_slice, None);
+                        }
+                    }
+                }
+                ModuleKind::AudioOut => {
+                    // Les entrées de MasterOut sont reliées au bus principal
+                    if let Some(left_buf) = step.input_buffers.get(0) {
+                        master_left_buf_idx = Some((left_buf.0 as usize) % MAX_SCRATCH_BUFFERS);
+                    }
+                    if let Some(right_buf) = step.input_buffers.get(1) {
+                        master_right_buf_idx = Some((right_buf.0 as usize) % MAX_SCRATCH_BUFFERS);
+                    }
+                }
+                ModuleKind::Constant => {
+                    if let Some(out_buf) = step.output_buffers.get(0) {
+                        let out_idx = (out_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
+                        self.scratch_buffers[out_idx][..num_frames].fill(0.0);
+                    }
+                }
+            }
+        }
+
+        // 4. Écriture dans le buffer de sortie stéréo entrelacé et calcul des métriques
+        for frame_idx in 0..num_frames {
+            let left_in = master_left_buf_idx
+                .map(|idx| self.scratch_buffers[idx][frame_idx])
+                .unwrap_or(0.0);
+
+            // Si seule l'entrée gauche est connectée, dupliquer sur la droite (mono -> stéréo)
+            let right_in = master_right_buf_idx
+                .map(|idx| self.scratch_buffers[idx][frame_idx])
+                .unwrap_or(left_in);
+
+            let out_l = left_in * self.master_gain;
+            let out_r = right_in * self.master_gain;
+
+            output[frame_idx * 2] = out_l;
+            output[frame_idx * 2 + 1] = out_r;
+
+            self.accumulate_sample(out_l, out_r);
+        }
+
+        // Zéro-padding si le buffer de sortie est plus grand que num_frames
+        if output.len() > num_frames * 2 {
+            output[num_frames * 2..].fill(0.0);
         }
     }
 
@@ -140,7 +332,6 @@ impl RealtimeAudioProcessor {
             rms_right: rms_r,
         };
 
-        // Envoi non bloquant : si plein, drop immédiat (drop-on-full)
         let _ = self.channels.telemetry_producer.push(telemetry);
 
         self.current_peak_l = 0.0;

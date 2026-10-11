@@ -12,7 +12,7 @@ Cette feuille de route formalise les jalons d'implémentation de **The Grid**, d
 [x] Étape 3 : Modèle de Patch, Algorithme Topologique & Commandes IPC
 [x] Étape 4 : Télémétrie Décimée Host -> Frontend & Vu-Mètres UI
 [x] Étape 5 : Rendu Canvas 2D Interactif (Grille & Câbles de Bézier)
-[ ] Étape 6 : Primitives DSP (Oscillateur Sin/Saw/Square, Filtre SVF, Enveloppe ADSR)
+[x] Étape 6 : Primitives DSP (Oscillateur Sin/Saw/Square, Filtre SVF, Enveloppe ADSR)
 [ ] Étape 7 : Rendu Audio Réel & Gestion Polyphonique / Modulation CV
 ```
 

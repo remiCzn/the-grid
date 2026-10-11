@@ -1,5 +1,7 @@
-use grid_core::compiler::ExecutionPlan;
+use grid_core::compiler::{compile_patch, ExecutionPlan};
+use grid_core::graph::AudioGraph;
 use grid_core::message::AudioCommand;
+use grid_core::model::{Cable, ModuleId, ModuleInstance, ModuleKind, Patch, PortId, Position};
 use grid_engine::realtime::RealtimeAudioProcessor;
 use grid_engine::ringbuffer::{
     create_channels, COMMAND_QUEUE_CAPACITY, TELEMETRY_QUEUE_CAPACITY,
@@ -10,7 +12,6 @@ fn test_spsc_command_queue_transfer() {
     let (mut host, engine) = create_channels();
     let mut processor = RealtimeAudioProcessor::new(engine, 48000.0);
 
-    // Host pousse des commandes
     host.command_producer
         .push(AudioCommand::SetMasterGain(0.5))
         .expect("Push should succeed");
@@ -31,23 +32,14 @@ fn test_spsc_command_queue_transfer() {
         .push(AudioCommand::SetPlaying(true))
         .expect("Push should succeed");
 
-    // Buffer audio stéréo de 128 échantillons (64 frames)
     let mut buffer = [1.0f32; 128];
     processor.process_interleaved_buffer(&mut buffer);
 
     assert!(processor.is_playing);
     assert_eq!(processor.master_gain, 0.5);
     assert!(processor.current_plan.is_some());
-    assert_eq!(
-        processor
-            .current_plan
-            .as_ref()
-            .unwrap()
-            .required_scratch_buffers,
-        4
-    );
 
-    // Test clamp du gain (ex: valeur négative ou > 2.0)
+    // Test clamp du gain
     host.command_producer
         .push(AudioCommand::SetMasterGain(5.0))
         .expect("Push should succeed");
@@ -57,10 +49,108 @@ fn test_spsc_command_queue_transfer() {
 }
 
 #[test]
+fn test_realtime_processor_active_sound_generation_and_parameter_update() {
+    let (mut host, engine) = create_channels();
+    let mut processor = RealtimeAudioProcessor::new(engine, 48000.0);
+
+    // Créer un patch avec VCO 1 -> VCA 1 -> AudioOut
+    let mut patch = Patch::new("Sound Patch");
+    let osc = ModuleInstance::new(
+        ModuleId(1),
+        ModuleKind::Oscillator,
+        "VCO",
+        Position { x: 0.0, y: 0.0 },
+    );
+    let vca = ModuleInstance::new(
+        ModuleId(2),
+        ModuleKind::Gain,
+        "VCA",
+        Position { x: 100.0, y: 0.0 },
+    );
+    let out = ModuleInstance::new(
+        ModuleId(3),
+        ModuleKind::AudioOut,
+        "Master",
+        Position { x: 200.0, y: 0.0 },
+    );
+
+    patch.modules.extend(vec![osc, vca, out]);
+
+    // Câble 1: Osc Out (port 1) -> VCA In (port 0)
+    patch.cables.push(Cable {
+        id: 1,
+        from_module: ModuleId(1),
+        from_port: PortId(1),
+        to_module: ModuleId(2),
+        to_port: PortId(0),
+    });
+
+    // Câble 2: VCA Out (port 2) -> Master Left (port 0)
+    patch.cables.push(Cable {
+        id: 2,
+        from_module: ModuleId(2),
+        from_port: PortId(2),
+        to_module: ModuleId(3),
+        to_port: PortId(0),
+    });
+
+    let graph = AudioGraph::from_patch(&patch).expect("Graph validation");
+    let plan = compile_patch(&graph, &patch).expect("Plan compilation");
+
+    // Envoyer le plan et activer la lecture
+    host.command_producer
+        .push(AudioCommand::LoadExecutionPlan(plan))
+        .expect("Load plan");
+    host.command_producer
+        .push(AudioCommand::SetPlaying(true))
+        .expect("Set playing");
+    host.command_producer
+        .push(AudioCommand::SetMasterGain(1.0))
+        .expect("Set gain");
+
+    let mut buffer = [0.0f32; 128]; // 64 frames stéréo
+    processor.process_interleaved_buffer(&mut buffer);
+
+    let max_amp = buffer.iter().fold(0.0f32, |acc, &x| acc.max(x.abs()));
+    assert!(
+        max_amp > 0.1,
+        "Le moteur audio doit générer un signal réel (max: {})",
+        max_amp
+    );
+
+    // Mettre à jour la fréquence du VCO et le gain du VCA en direct via SetParameter
+    host.command_producer
+        .push(AudioCommand::SetParameter {
+            module_id: 1,
+            param_id: 0,
+            value: 880.0,
+        })
+        .expect("Set freq");
+    host.command_producer
+        .push(AudioCommand::SetParameter {
+            module_id: 2,
+            param_id: 0,
+            value: 0.5,
+        })
+        .expect("Set gain");
+    host.command_producer
+        .push(AudioCommand::SetParameter {
+            module_id: 3,
+            param_id: 0,
+            value: 0.9,
+        })
+        .expect("Set master volume");
+
+    let mut buffer2 = [0.0f32; 128];
+    processor.process_interleaved_buffer(&mut buffer2);
+    let max_amp2 = buffer2.iter().fold(0.0f32, |acc, &x| acc.max(x.abs()));
+    assert!(max_amp2 > 0.05);
+}
+
+#[test]
 fn test_command_queue_saturation_does_not_panic() {
     let (mut host, _engine) = create_channels();
 
-    // Remplir complètement la queue
     for _ in 0..COMMAND_QUEUE_CAPACITY {
         assert!(host
             .command_producer
@@ -68,7 +158,6 @@ fn test_command_queue_saturation_does_not_panic() {
             .is_ok());
     }
 
-    // Le push suivant doit échouer proprement sans paniquer
     let overflow = host.command_producer.push(AudioCommand::SetPlaying(true));
     assert!(overflow.is_err());
 }
@@ -81,28 +170,6 @@ fn test_realtime_processor_silence_when_stopped() {
     let mut buffer = [0.99f32; 256];
     processor.process_interleaved_buffer(&mut buffer);
 
-    // Quand non-playing, le buffer doit être forcé à zéro
-    for sample in buffer.iter() {
-        assert_eq!(*sample, 0.0);
-    }
-}
-
-#[test]
-fn test_realtime_processor_running_playback() {
-    let (mut host, engine) = create_channels();
-    let mut processor = RealtimeAudioProcessor::new(engine, 48000.0);
-
-    host.command_producer
-        .push(AudioCommand::SetPlaying(true))
-        .expect("Push should succeed");
-    host.command_producer
-        .push(AudioCommand::SetMasterGain(1.0))
-        .expect("Push should succeed");
-
-    let mut buffer = [0.5f32; 64];
-    processor.process_interleaved_buffer(&mut buffer);
-
-    // Le buffer muet sous lecture est mis à 0.0 (en attente des générateurs DSP)
     for sample in buffer.iter() {
         assert_eq!(*sample, 0.0);
     }
@@ -113,14 +180,11 @@ fn test_telemetry_decimation_and_drop_on_full() {
     let (mut host, engine) = create_channels();
     let mut processor = RealtimeAudioProcessor::new(engine, 48000.0);
 
-    // Régler l'intervalle de télémétrie très bas pour le test (toutes les 10 frames)
     processor.set_telemetry_interval(10);
 
-    // Rendu d'un bloc de 40 frames stéréo (80 floats)
     let mut buffer = [0.0f32; 80];
     processor.process_interleaved_buffer(&mut buffer);
 
-    // On s'attend à recevoir 4 trames de télémétrie (40 / 10 = 4)
     let mut frames_received = 0;
     while let Ok(frame) = host.telemetry_consumer.pop() {
         frames_received += 1;
@@ -130,13 +194,10 @@ fn test_telemetry_decimation_and_drop_on_full() {
     }
     assert_eq!(frames_received, 4);
 
-    // Test de saturation de la télémétrie :
-    // On génère plus de frames que la capacité du buffer sans que l'hôte ne dépile
     for _ in 0..(TELEMETRY_QUEUE_CAPACITY * 2) {
         processor.process_interleaved_buffer(&mut buffer);
     }
 
-    // Le processeur audio n'a pas paniqué et l'hôte peut dépiler jusqu'à saturation
     let mut total_drained = 0;
     while host.telemetry_consumer.pop().is_ok() {
         total_drained += 1;

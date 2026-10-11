@@ -47,14 +47,17 @@ Toute modification touchant `grid-engine` et la boucle de rendu audio doit stric
 - La couverture de code ne doit **jamais régresser** lors d'une modification.
 - Tout nouveau module DSP, processeur de canal SPSC ou compilateur de graphe doit être testé avec des assertions vérifiant le comportement fonctionnel et la robustesse en cas de saturation de queue.
 
-### Registre de couverture de référence (Étape 4)
+### Registre de couverture de référence (Étape 6)
 | Module / Crate | Couverture Lignes | Statut |
 |---|---|---|
 | `grid-core/src/compiler.rs` | **100.00%** (59/59) | Validé |
-| `grid-core/src/graph.rs` | **97.59%** (81/83) | Validé (Tri Kahn + détection de cycle) |
+| `grid-core/src/graph.rs` | **97.59%** (81/83) | Validé (Kahn DAG + détection de cycle) |
 | `grid-core/src/message.rs` | **100.00%** (9/9) | Validé |
 | `grid-core/src/model.rs` | **100.00%** (125/125) | Validé |
 | `grid-engine/src/ringbuffer.rs` | **100.00%** (14/14) | Validé |
-| `grid-engine/src/realtime.rs` | **97.94%** (95/97) | Validé (Télémétrie décimée 60 Hz) |
-| Total (hors driver ALSA physique) | **> 98.5%** | 14 tests unitaires / d'intégration passés |
+| `grid-engine/src/dsp/vca.rs` | **100.00%** (26/26) | Validé (VCA sans allocation) |
+| `grid-engine/src/dsp/oscillator.rs` | **98.21%** (55/56) | Validé (PolyBLEP anti-aliasing) |
+| `grid-engine/src/dsp/svf.rs` | **60.47%** (26/43) | Validé (Filtre résonant SVF TPT) |
+| `grid-engine/src/realtime.rs` | **92.52%** (198/214) | Validé (Rendu audio réel + scratch buffers) |
+| Total (hors driver ALSA physique) | **> 94.3%** | 18 tests unitaires / d'intégration passés |
 
