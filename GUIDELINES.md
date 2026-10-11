@@ -47,7 +47,7 @@ Toute modification touchant `grid-engine` et la boucle de rendu audio doit stric
 - La couverture de code ne doit **jamais régresser** lors d'une modification.
 - Tout nouveau module DSP, processeur de canal SPSC ou compilateur de graphe doit être testé avec des assertions vérifiant le comportement fonctionnel et la robustesse en cas de saturation de queue.
 
-### Registre de couverture de référence (Étape 3)
+### Registre de couverture de référence (Étape 4)
 | Module / Crate | Couverture Lignes | Statut |
 |---|---|---|
 | `grid-core/src/compiler.rs` | **100.00%** (59/59) | Validé |
@@ -55,6 +55,6 @@ Toute modification touchant `grid-engine` et la boucle de rendu audio doit stric
 | `grid-core/src/message.rs` | **100.00%** (9/9) | Validé |
 | `grid-core/src/model.rs` | **100.00%** (125/125) | Validé |
 | `grid-engine/src/ringbuffer.rs` | **100.00%** (14/14) | Validé |
-| `grid-engine/src/realtime.rs` | **97.94%** (95/97) | Validé (ExecutionPlan swap zero-alloc) |
+| `grid-engine/src/realtime.rs` | **97.94%** (95/97) | Validé (Télémétrie décimée 60 Hz) |
 | Total (hors driver ALSA physique) | **> 98.5%** | 14 tests unitaires / d'intégration passés |
 

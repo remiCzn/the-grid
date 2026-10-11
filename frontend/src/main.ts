@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 // Interfaces typées du patch synchronisées avec le backend Rust
 export interface Position {
@@ -46,12 +47,48 @@ export interface Patch {
   cables: Cable[];
 }
 
+export interface TelemetryFrame {
+  frame_index: number;
+  peak_left: number;
+  peak_right: number;
+  rms_left: number;
+  rms_right: number;
+}
+
 let isPlaying = false;
 const btnPower = document.getElementById("btn-power") as HTMLButtonElement | null;
 const masterGain = document.getElementById("master-gain") as HTMLInputElement | null;
+const gainLabel = document.getElementById("gain-label") as HTMLSpanElement | null;
 const canvas = document.getElementById("grid-canvas") as HTMLCanvasElement | null;
 
-// Création d'un patch initial par défaut
+// Éléments du vu-mètre
+const meterBarL = document.getElementById("meter-bar-l") as HTMLDivElement | null;
+const meterBarR = document.getElementById("meter-bar-r") as HTMLDivElement | null;
+const meterNumeric = document.getElementById("meter-numeric") as HTMLDivElement | null;
+
+// Écoute des événements de télémétrie décimée émis par le Host Rust (~60 Hz)
+listen<TelemetryFrame>("telemetry_update", (event) => {
+  const frame = event.payload;
+
+  // Calcul du pourcentage de crête pour les barres (0.0..=1.0)
+  const pctL = Math.min(100, Math.max(0, frame.peak_left * 100));
+  const pctR = Math.min(100, Math.max(0, frame.peak_right * 100));
+
+  if (meterBarL) meterBarL.style.width = `${pctL.toFixed(1)}%`;
+  if (meterBarR) meterBarR.style.width = `${pctR.toFixed(1)}%`;
+
+  if (meterNumeric) {
+    const maxPeak = Math.max(frame.peak_left, frame.peak_right);
+    if (maxPeak <= 0.0001) {
+      meterNumeric.textContent = "-inf dB";
+    } else {
+      const db = 20 * Math.log10(maxPeak);
+      meterNumeric.textContent = `${db.toFixed(1)} dB`;
+    }
+  }
+});
+
+// Patch par défaut
 const defaultPatch: Patch = {
   version: "1.0.0",
   name: "Init Patch",
@@ -109,7 +146,6 @@ if (btnPower) {
     isPlaying = !isPlaying;
     try {
       if (isPlaying) {
-        // Appliquer d'abord le patch au moteur
         await invoke("apply_patch", { patch: defaultPatch });
         await invoke("start_audio");
         btnPower.classList.add("active");
@@ -118,6 +154,9 @@ if (btnPower) {
         await invoke("stop_audio");
         btnPower.classList.remove("active");
         btnPower.textContent = "Audio OFF";
+        if (meterBarL) meterBarL.style.width = "0%";
+        if (meterBarR) meterBarR.style.width = "0%";
+        if (meterNumeric) meterNumeric.textContent = "-inf dB";
       }
     } catch (err) {
       console.error("Erreur lors de l'appel IPC audio:", err);
@@ -128,6 +167,7 @@ if (btnPower) {
 if (masterGain) {
   masterGain.addEventListener("input", async (e) => {
     const val = parseFloat((e.target as HTMLInputElement).value);
+    if (gainLabel) gainLabel.textContent = `${Math.round(val * 100)}%`;
     try {
       await invoke("set_master_gain", { gain: val });
     } catch (err) {

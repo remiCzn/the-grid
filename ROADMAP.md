@@ -10,7 +10,7 @@ Cette feuille de route formalise les jalons d'implémentation de **The Grid**, d
 [x] Étape 1 : Arborescence Workspace, Toolchain & Scaffolding
 [x] Étape 2 : Runtime Audio CPAL, Canaux SPSC Lock-Free & Télémétrie
 [x] Étape 3 : Modèle de Patch, Algorithme Topologique & Commandes IPC
-[ ] Étape 4 : Télémétrie Décimée Host -> Frontend & Vu-Mètres UI
+[x] Étape 4 : Télémétrie Décimée Host -> Frontend & Vu-Mètres UI
 [ ] Étape 5 : Rendu Canvas 2D Interactif (Grille & Câbles de Bézier)
 [ ] Étape 6 : Primitives DSP (Oscillateur Sin/Saw/Square, Filtre SVF, Enveloppe ADSR)
 [ ] Étape 7 : Rendu Audio Réel & Gestion Polyphonique / Modulation CV

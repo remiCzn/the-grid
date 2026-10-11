@@ -17,7 +17,7 @@ body, html, #app {
 }
 
 .toolbar {
-  height: 44px;
+  height: 48px;
   background-color: #1a1c22;
   border-bottom: 1px solid #282a32;
   display: flex;
@@ -27,17 +27,31 @@ body, html, #app {
   user-select: none;
 }
 
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .logo {
   font-weight: 700;
   letter-spacing: 2px;
   color: #ff5200; /* Bitwig Orange */
-  font-size: 14px;
+  font-size: 15px;
+}
+
+.version-tag {
+  font-size: 11px;
+  color: #686d7e;
+  background: #232630;
+  padding: 2px 6px;
+  border-radius: 3px;
 }
 
 .controls {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 20px;
   font-size: 13px;
 }
 
@@ -45,14 +59,89 @@ body, html, #app {
   background: #252833;
   color: #fff;
   border: 1px solid #363a48;
-  padding: 5px 12px;
+  padding: 6px 14px;
   border-radius: 4px;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.controls button:hover {
+  background: #2f3442;
 }
 
 .controls button.active {
   background: #ff5200;
   border-color: #ff5200;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(255, 82, 0, 0.4);
+}
+
+.param-slider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #a0a4b4;
+}
+
+.param-slider input[type="range"] {
+  accent-color: #ff5200;
+  cursor: pointer;
+}
+
+#gain-label {
+  min-width: 34px;
+  font-variant-numeric: tabular-nums;
+  color: #e0e2e8;
+}
+
+/* Vu-Mètre Stéréo */
+.meter-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #111215;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid #282a32;
+}
+
+.meter-channel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.meter-label {
+  font-size: 10px;
+  color: #686d7e;
+  font-weight: 700;
+}
+
+.meter-track {
+  width: 70px;
+  height: 8px;
+  background: #1a1c22;
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.meter-bar {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #2ecc71 0%, #f1c40f 75%, #e74c3c 100%);
+  border-radius: 2px;
+  transition: width 0.05s linear;
+}
+
+.meter-numeric {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #7b8094;
+  min-width: 48px;
+  text-align: right;
 }
 
 .grid-container {

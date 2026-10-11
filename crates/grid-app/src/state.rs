@@ -1,22 +1,45 @@
+use crate::telemetry::TelemetryRelay;
 use grid_core::compiler::compile_patch;
 use grid_core::graph::AudioGraph;
 use grid_core::message::AudioCommand;
 use grid_core::model::Patch;
+use grid_engine::driver::AudioDriver;
 use grid_engine::ringbuffer::HostChannels;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use tauri::AppHandle;
 
 /// État global partagé géré par Tauri côté Host (non-audio thread)
 pub struct AppState {
     pub channels: Mutex<Option<HostChannels>>,
+    pub driver: Mutex<Option<AudioDriver>>,
     pub current_patch: Mutex<Option<Patch>>,
+    pub telemetry_relay: TelemetryRelay,
 }
 
 impl AppState {
     pub fn new() -> Self {
         Self {
             channels: Mutex::new(None),
+            driver: Mutex::new(None),
             current_patch: Mutex::new(None),
+            telemetry_relay: TelemetryRelay::new(),
         }
+    }
+
+    /// Initialise le driver audio CPAL si ce n'est pas déjà fait et démarre la télémétrie
+    pub fn ensure_audio_initialized(self: &Arc<Self>, app_handle: &AppHandle) -> Result<(), String> {
+        let mut driver_lock = self.driver.lock().map_err(|e| e.to_string())?;
+        if driver_lock.is_none() {
+            let driver = AudioDriver::init().map_err(|e| format!("Erreur driver audio: {e}"))?;
+            
+            let mut channels_lock = self.channels.lock().map_err(|e| e.to_string())?;
+            *channels_lock = Some(driver.host_channels);
+            *driver_lock = Some(driver);
+
+            // Démarrer la télémétrie
+            self.telemetry_relay.start(app_handle.clone(), Arc::clone(self));
+        }
+        Ok(())
     }
 
     /// Envoie une commande vers le thread audio de manière non-bloquante
@@ -41,8 +64,10 @@ impl AppState {
         // 2. Compilation en plan linéaire d'exécution
         let plan = compile_patch(&graph, &patch).map_err(|e| e.to_string())?;
 
-        // 3. Transmission non-bloquante au moteur audio
-        self.send_audio_command(AudioCommand::LoadExecutionPlan(plan))?;
+        // 3. Transmission non-bloquante au moteur audio (si initialisé)
+        if self.channels.lock().map_err(|e| e.to_string())?.is_some() {
+            self.send_audio_command(AudioCommand::LoadExecutionPlan(plan))?;
+        }
 
         // 4. Sauvegarde dans l'état host
         let mut patch_lock = self.current_patch.lock().map_err(|e| e.to_string())?;
