@@ -1,4 +1,4 @@
-use crate::dsp::{AdsrEnvelope, Oscillator, StateVariableFilter, VcaGain, Waveform};
+use crate::dsp::DspNode;
 use crate::ringbuffer::EngineChannels;
 use grid_core::compiler::ExecutionPlan;
 use grid_core::message::{AudioCommand, TelemetryFrame};
@@ -13,10 +13,9 @@ pub const MAX_MODULE_SLOTS: usize = 32;
 struct DspSlot {
     module_id: u32,
     kind: ModuleKind,
-    osc: Oscillator,
-    vca: VcaGain,
-    svf: StateVariableFilter,
-    env: AdsrEnvelope,
+    node: DspNode,
+    input_buffers: [Option<usize>; 2],
+    output_buffers: [Option<usize>; 2],
     is_active: bool,
 }
 
@@ -25,10 +24,9 @@ impl DspSlot {
         Self {
             module_id: 0,
             kind: ModuleKind::Oscillator,
-            osc: Oscillator::new(sample_rate),
-            vca: VcaGain::new(),
-            svf: StateVariableFilter::new(sample_rate),
-            env: AdsrEnvelope::new(sample_rate),
+            node: DspNode::from_kind(ModuleKind::Oscillator, sample_rate, &[]),
+            input_buffers: [None; 2],
+            output_buffers: [None; 2],
             is_active: false,
         }
     }
@@ -48,6 +46,9 @@ pub struct RealtimeAudioProcessor {
 
     scratch_buffers: [[f32; MAX_BLOCK_SIZE]; MAX_SCRATCH_BUFFERS],
     dsp_slots: Vec<DspSlot>,
+
+    master_left_buf_idx: Option<usize>,
+    master_right_buf_idx: Option<usize>,
 
     frame_counter: u64,
     samples_since_last_telemetry: usize,
@@ -77,6 +78,8 @@ impl RealtimeAudioProcessor {
             current_plan: None,
             scratch_buffers: [[0.0f32; MAX_BLOCK_SIZE]; MAX_SCRATCH_BUFFERS],
             dsp_slots,
+            master_left_buf_idx: None,
+            master_right_buf_idx: None,
             frame_counter: 0,
             samples_since_last_telemetry: 0,
             telemetry_interval_samples: interval,
@@ -96,86 +99,43 @@ impl RealtimeAudioProcessor {
         for slot in &mut self.dsp_slots {
             slot.is_active = false;
         }
+        self.master_left_buf_idx = None;
+        self.master_right_buf_idx = None;
 
         for (i, step) in plan.steps.iter().enumerate() {
             if i >= self.dsp_slots.len() {
                 break;
             }
+
+            let mut in_bufs = [None; 2];
+            for (idx, b) in step.input_buffers.iter().enumerate().take(2) {
+                in_bufs[idx] = Some((b.0 as usize) % MAX_SCRATCH_BUFFERS);
+            }
+
+            let mut out_bufs = [None; 2];
+            for (idx, b) in step.output_buffers.iter().enumerate().take(2) {
+                out_bufs[idx] = Some((b.0 as usize) % MAX_SCRATCH_BUFFERS);
+            }
+
+            if step.kind == ModuleKind::AudioOut {
+                self.master_left_buf_idx = in_bufs[0];
+                self.master_right_buf_idx = in_bufs[1];
+            }
+
             let slot = &mut self.dsp_slots[i];
             slot.module_id = step.module_id.0;
             slot.kind = step.kind;
+            slot.node = DspNode::from_kind(step.kind, self.sample_rate, &step.initial_parameters);
+            slot.input_buffers = in_bufs;
+            slot.output_buffers = out_bufs;
             slot.is_active = true;
-
-            match step.kind {
-                ModuleKind::Oscillator => {
-                    let freq = step.initial_parameters.get(0).copied().unwrap_or(440.0);
-                    slot.osc.set_frequency(freq);
-                    slot.osc.waveform = Waveform::Sawtooth;
-                }
-                ModuleKind::Gain => {
-                    let gain = step.initial_parameters.get(0).copied().unwrap_or(1.0);
-                    slot.vca.set_gain(gain);
-                }
-                ModuleKind::Filter => {
-                    let cutoff = step.initial_parameters.get(0).copied().unwrap_or(1000.0);
-                    let res = step.initial_parameters.get(1).copied().unwrap_or(0.707);
-                    slot.svf.set_cutoff(cutoff);
-                    slot.svf.set_resonance(res);
-                }
-                ModuleKind::Envelope => {
-                    let a = step.initial_parameters.get(0).copied().unwrap_or(10.0);
-                    let d = step.initial_parameters.get(1).copied().unwrap_or(100.0);
-                    let s = step.initial_parameters.get(2).copied().unwrap_or(0.7);
-                    let r = step.initial_parameters.get(3).copied().unwrap_or(200.0);
-                    slot.env.set_attack(a);
-                    slot.env.set_decay(d);
-                    slot.env.set_sustain(s);
-                    slot.env.set_release(r);
-                }
-                ModuleKind::Constant => {}
-                ModuleKind::AudioOut => {
-                    let gain = step.initial_parameters.get(0).copied().unwrap_or(0.8);
-                    slot.vca.set_gain(gain);
-                }
-            }
         }
     }
 
     fn update_parameter(&mut self, module_id: u32, param_id: u32, value: f32) {
         for slot in &mut self.dsp_slots {
             if slot.is_active && slot.module_id == module_id {
-                match slot.kind {
-                    ModuleKind::Oscillator => {
-                        if param_id == 0 {
-                            slot.osc.set_frequency(value);
-                        }
-                    }
-                    ModuleKind::Gain => {
-                        if param_id == 0 {
-                            slot.vca.set_gain(value);
-                        }
-                    }
-                    ModuleKind::Filter => {
-                        if param_id == 0 {
-                            slot.svf.set_cutoff(value);
-                        } else if param_id == 1 {
-                            slot.svf.set_resonance(value);
-                        }
-                    }
-                    ModuleKind::Envelope => match param_id {
-                        0 => slot.env.set_attack(value),
-                        1 => slot.env.set_decay(value),
-                        2 => slot.env.set_sustain(value),
-                        3 => slot.env.set_release(value),
-                        _ => {}
-                    },
-                    ModuleKind::AudioOut => {
-                        if param_id == 0 {
-                            slot.vca.set_gain(value);
-                        }
-                    }
-                    ModuleKind::Constant => {}
-                }
+                slot.node.set_parameter(param_id, value);
                 break;
             }
         }
@@ -210,8 +170,9 @@ impl RealtimeAudioProcessor {
                     self.sample_accum_count = 0;
                     self.samples_since_last_telemetry = 0;
                     for slot in &mut self.dsp_slots {
-                        slot.svf.reset();
-                        slot.env.reset();
+                        if slot.is_active {
+                            slot.node.reset();
+                        }
                     }
                 }
             }
@@ -227,94 +188,67 @@ impl RealtimeAudioProcessor {
             return;
         }
 
-        let plan = self.current_plan.as_ref().unwrap();
-
-        let mut master_left_buf_idx: Option<usize> = None;
-        let mut master_right_buf_idx: Option<usize> = None;
-
-        for (step_idx, step) in plan.steps.iter().enumerate() {
-            if step_idx >= self.dsp_slots.len() {
-                break;
-            }
-            let slot = &mut self.dsp_slots[step_idx];
-            if !slot.is_active {
+        // Exécution de chaque slot DSP actif
+        for slot in &mut self.dsp_slots {
+            if !slot.is_active || slot.kind == ModuleKind::AudioOut {
                 continue;
             }
 
-            match slot.kind {
-                ModuleKind::Oscillator => {
-                    if let Some(out_buf) = step.output_buffers.get(0) {
-                        let out_idx = (out_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
-                        let out_slice = &mut self.scratch_buffers[out_idx][..num_frames];
-                        slot.osc.process_block(out_slice, None);
+            if let Some(out_idx) = slot.output_buffers[0] {
+                let in_0_opt = slot.input_buffers[0];
+                let in_1_opt = slot.input_buffers[1];
+
+                let (left, right) = self.scratch_buffers.split_at_mut(out_idx);
+                let (out_slice_arr, right_rest) = right.split_at_mut(1);
+                let out_slice = &mut out_slice_arr[0][..num_frames];
+
+                let get_in_slice = |idx: usize| -> &[f32] {
+                    if idx < out_idx {
+                        &left[idx][..num_frames]
+                    } else if idx > out_idx {
+                        &right_rest[idx - out_idx - 1][..num_frames]
+                    } else {
+                        &[]
                     }
-                }
-                ModuleKind::Envelope => {
-                    if let Some(out_buf) = step.output_buffers.get(0) {
-                        let out_idx = (out_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
-                        let out_slice = &mut self.scratch_buffers[out_idx][..num_frames];
-                        slot.env.process_block(out_slice, None);
+                };
+
+                match (in_0_opt, in_1_opt) {
+                    (Some(i0), Some(i1)) => {
+                        let s0 = get_in_slice(i0);
+                        let s1 = get_in_slice(i1);
+                        let inputs = [s0, s1];
+                        let mut outputs = [out_slice];
+                        slot.node.process_block(&inputs, &mut outputs);
                     }
-                }
-                ModuleKind::Filter => {
-                    if let (Some(in_buf), Some(out_buf)) =
-                        (step.input_buffers.get(0), step.output_buffers.get(0))
-                    {
-                        let in_idx = (in_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
-                        let out_idx = (out_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
-                        if in_idx != out_idx {
-                            let (in_slice, out_slice) = if in_idx < out_idx {
-                                let (left, right) = self.scratch_buffers.split_at_mut(out_idx);
-                                (&left[in_idx][..num_frames], &mut right[0][..num_frames])
-                            } else {
-                                let (left, right) = self.scratch_buffers.split_at_mut(in_idx);
-                                (&right[0][..num_frames], &mut left[out_idx][..num_frames])
-                            };
-                            slot.svf.process_block(in_slice, out_slice);
-                        }
+                    (Some(i0), None) => {
+                        let s0 = get_in_slice(i0);
+                        let inputs = [s0];
+                        let mut outputs = [out_slice];
+                        slot.node.process_block(&inputs, &mut outputs);
                     }
-                }
-                ModuleKind::Gain => {
-                    if let (Some(in_buf), Some(out_buf)) =
-                        (step.input_buffers.get(0), step.output_buffers.get(0))
-                    {
-                        let in_idx = (in_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
-                        let out_idx = (out_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
-                        if in_idx != out_idx {
-                            let (in_slice, out_slice) = if in_idx < out_idx {
-                                let (left, right) = self.scratch_buffers.split_at_mut(out_idx);
-                                (&left[in_idx][..num_frames], &mut right[0][..num_frames])
-                            } else {
-                                let (left, right) = self.scratch_buffers.split_at_mut(in_idx);
-                                (&right[0][..num_frames], &mut left[out_idx][..num_frames])
-                            };
-                            slot.vca.process_block(in_slice, out_slice, None);
-                        }
+                    (None, Some(i1)) => {
+                        let s1 = get_in_slice(i1);
+                        let inputs = [s1];
+                        let mut outputs = [out_slice];
+                        slot.node.process_block(&inputs, &mut outputs);
                     }
-                }
-                ModuleKind::AudioOut => {
-                    if let Some(left_buf) = step.input_buffers.get(0) {
-                        master_left_buf_idx = Some((left_buf.0 as usize) % MAX_SCRATCH_BUFFERS);
-                    }
-                    if let Some(right_buf) = step.input_buffers.get(1) {
-                        master_right_buf_idx = Some((right_buf.0 as usize) % MAX_SCRATCH_BUFFERS);
-                    }
-                }
-                ModuleKind::Constant => {
-                    if let Some(out_buf) = step.output_buffers.get(0) {
-                        let out_idx = (out_buf.0 as usize) % MAX_SCRATCH_BUFFERS;
-                        self.scratch_buffers[out_idx][..num_frames].fill(0.0);
+                    (None, None) => {
+                        let mut outputs = [out_slice];
+                        slot.node.process_block(&[], &mut outputs);
                     }
                 }
             }
         }
 
+        // Rendu final vers les buffers de sortie entrelacés
         for frame_idx in 0..num_frames {
-            let left_in = master_left_buf_idx
+            let left_in = self
+                .master_left_buf_idx
                 .map(|idx| self.scratch_buffers[idx][frame_idx])
                 .unwrap_or(0.0);
 
-            let right_in = master_right_buf_idx
+            let right_in = self
+                .master_right_buf_idx
                 .map(|idx| self.scratch_buffers[idx][frame_idx])
                 .unwrap_or(left_in);
 

@@ -1,9 +1,11 @@
 pub mod envelope;
+pub mod node;
 pub mod oscillator;
 pub mod svf;
 pub mod vca;
 
 pub use envelope::{AdsrEnvelope, EnvelopeStage};
+pub use node::{ConstantNode, DspNode};
 pub use oscillator::{Oscillator, Waveform};
 pub use svf::{FilterMode, StateVariableFilter};
 pub use vca::VcaGain;
