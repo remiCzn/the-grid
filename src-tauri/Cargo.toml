@@ -1,0 +1,48 @@
+[workspace]
+resolver = "2"
+members = ["grid-core", "grid-engine"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["The Grid Authors"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+rtrb = "0.3"
+cpal = "0.15"
+log = "0.4"
+
+[package]
+name = "tauri-app"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "grid_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+grid-core = { path = "grid-core" }
+grid-engine = { path = "grid-engine" }
+log = { workspace = true }
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
