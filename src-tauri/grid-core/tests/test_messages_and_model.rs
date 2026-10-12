@@ -1,5 +1,4 @@
-use grid_core::compiler::{compile_patch, ExecutionPlan};
-use grid_core::graph::{AudioGraph, GraphError};
+use grid_core::compiler::{compile_patch, CompileError, ExecutionPlan, PatchCompiler};
 use grid_core::message::{AudioCommand, TelemetryFrame};
 use grid_core::model::{
     Cable, ModuleId, ModuleInstance, ModuleKind, Patch, PortId, Position, SignalType,
@@ -151,16 +150,15 @@ fn test_patch_topological_compilation() {
         to_port: PortId(0),
     });
 
-    let graph = AudioGraph::from_patch(&patch).expect("Graph must be valid");
-
-    assert_eq!(
-        graph.execution_order,
-        vec![ModuleId(1), ModuleId(2), ModuleId(3)]
-    );
-
-    let plan = compile_patch(&graph, &patch).expect("Compilation must succeed");
+    let plan = PatchCompiler::compile(&patch).expect("Compilation must succeed");
+    let plan2 = compile_patch(&patch).expect("compile_patch helper must succeed");
+    assert_eq!(plan, plan2);
     assert_eq!(plan.step_count(), 3);
     assert_eq!(plan.required_scratch_buffers, 2);
+    assert_eq!(
+        plan.steps.iter().map(|s| s.module_id).collect::<Vec<_>>(),
+        vec![ModuleId(1), ModuleId(2), ModuleId(3)]
+    );
 }
 
 #[test]
@@ -245,8 +243,8 @@ fn test_graph_cycle_detection() {
         to_port: PortId(0),
     });
 
-    let res = AudioGraph::from_patch(&patch);
-    assert_eq!(res.unwrap_err(), GraphError::CycleDetected);
+    let res = PatchCompiler::compile(&patch);
+    assert_eq!(res.unwrap_err(), CompileError::CycleDetected);
 }
 
 #[test]
@@ -268,8 +266,8 @@ fn test_graph_validation_errors() {
         to_port: PortId(0),
     });
     assert!(matches!(
-        AudioGraph::from_patch(&patch).unwrap_err(),
-        GraphError::ModuleNotFound(ModuleId(99))
+        PatchCompiler::compile(&patch).unwrap_err(),
+        CompileError::ModuleNotFound(ModuleId(99))
     ));
     patch.cables.clear();
 
@@ -281,20 +279,20 @@ fn test_graph_validation_errors() {
         to_port: PortId(0),
     });
     assert!(matches!(
-        AudioGraph::from_patch(&patch).unwrap_err(),
-        GraphError::PortNotFound { .. }
+        PatchCompiler::compile(&patch).unwrap_err(),
+        CompileError::PortNotFound { .. }
     ));
 }
 
 #[test]
-fn test_graph_error_display() {
-    let err = GraphError::CycleDetected;
+fn test_compile_error_display() {
+    let err = CompileError::CycleDetected;
     assert_eq!(format!("{err}"), "Cycle non retardé détecté dans le graphe");
 
-    let err_mod = GraphError::ModuleNotFound(ModuleId(42));
+    let err_mod = CompileError::ModuleNotFound(ModuleId(42));
     assert_eq!(format!("{err_mod}"), "Module introuvable: ModuleId(42)");
 
-    let err_port = GraphError::PortNotFound {
+    let err_port = CompileError::PortNotFound {
         module: ModuleId(1),
         port: 7,
     };
@@ -303,7 +301,7 @@ fn test_graph_error_display() {
         "Port introuvable sur le module ModuleId(1): 7"
     );
 
-    let err_src = GraphError::InvalidSourcePort {
+    let err_src = CompileError::InvalidSourcePort {
         module: ModuleId(1),
         port: 0,
     };
@@ -312,7 +310,7 @@ fn test_graph_error_display() {
         "Le port source 0 du module ModuleId(1) n'est pas une sortie"
     );
 
-    let err_dst = GraphError::InvalidTargetPort {
+    let err_dst = CompileError::InvalidTargetPort {
         module: ModuleId(2),
         port: 1,
     };
@@ -321,7 +319,7 @@ fn test_graph_error_display() {
         "Le port cible 1 du module ModuleId(2) n'est pas une entrée"
     );
 
-    let err_sig = GraphError::IncompatibleSignalType {
+    let err_sig = CompileError::IncompatibleSignalType {
         src: SignalType::Trigger,
         dst: SignalType::Audio,
     };

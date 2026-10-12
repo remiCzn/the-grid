@@ -16,6 +16,10 @@ _Avoid_: Audio unit, processor, plugin, voice
 A preallocated execution slot in the real-time engine hosting a configured DspNode.
 _Avoid_: Slot, rack item, voice container
 
+**PatchCompiler**:
+A compiler that validates patch topology, checks port compatibility, detects cycles, and generates a linear ExecutionPlan.
+_Avoid_: Graph validator, topological sorter, scheduler
+
 **ExecutionPlan**:
 A linear ordered sequence of audio execution steps and scratch buffer assignments compiled from a Patch.
 _Avoid_: Bytecode, pipeline, schedule
