@@ -1,6 +1,5 @@
 use crate::telemetry::TelemetryRelay;
-use grid_core::compiler::compile_patch;
-use grid_core::graph::AudioGraph;
+use grid_core::compiler::PatchCompiler;
 use grid_core::message::AudioCommand;
 use grid_core::model::Patch;
 use grid_engine::driver::AudioDriver;
@@ -64,13 +63,10 @@ impl AppState {
 
     /// Valide un patch, compile son graphe topologique et pousse le nouveau plan vers l'audio
     pub fn apply_patch(&self, patch: Patch) -> Result<(), String> {
-        // 1. Validation topologique et détection de cycles
-        let graph = AudioGraph::from_patch(&patch).map_err(|e| e.to_string())?;
+        // 1. Validation topologique et compilation en plan linéaire
+        let plan = PatchCompiler::compile(&patch).map_err(|e| e.to_string())?;
 
-        // 2. Compilation en plan linéaire d'exécution
-        let plan = compile_patch(&graph, &patch).map_err(|e| e.to_string())?;
-
-        // 3. Transmission non-bloquante au moteur audio (si initialisé)
+        // 2. Transmission non-bloquante au moteur audio (si initialisé)
         if self.channels.lock().map_err(|e| e.to_string())?.is_some() {
             self.send_audio_command(AudioCommand::LoadExecutionPlan(plan))?;
         }

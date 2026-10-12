@@ -1,5 +1,4 @@
-use grid_core::compiler::{compile_patch, ExecutionPlan};
-use grid_core::graph::AudioGraph;
+use grid_core::compiler::{ExecutionPlan, PatchCompiler};
 use grid_core::message::AudioCommand;
 use grid_core::model::{Cable, ModuleId, ModuleInstance, ModuleKind, Patch, PortId, Position};
 use grid_engine::realtime::RealtimeAudioProcessor;
@@ -94,8 +93,7 @@ fn test_realtime_processor_active_sound_generation_and_parameter_update() {
         to_port: PortId(0),
     });
 
-    let graph = AudioGraph::from_patch(&patch).expect("Graph validation");
-    let plan = compile_patch(&graph, &patch).expect("Plan compilation");
+    let plan = PatchCompiler::compile(&patch).expect("Plan compilation");
 
     // Envoyer le plan et activer la lecture
     host.command_producer

@@ -1,6 +1,26 @@
-use crate::graph::{AudioGraph, GraphError};
-use crate::model::{ModuleId, ModuleKind, Patch};
+use crate::model::{ModuleId, ModuleKind, Patch, PortDirection, SignalType};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
+use thiserror::Error;
+
+/// Erreur survenue lors de la validation topologique ou de la compilation du Patch
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum CompileError {
+    #[error("Cycle non retardé détecté dans le graphe")]
+    CycleDetected,
+    #[error("Module introuvable: {0:?}")]
+    ModuleNotFound(ModuleId),
+    #[error("Port introuvable sur le module {module:?}: {port:?}")]
+    PortNotFound { module: ModuleId, port: u32 },
+    #[error("Le port source {port:?} du module {module:?} n'est pas une sortie")]
+    InvalidSourcePort { module: ModuleId, port: u32 },
+    #[error("Le port cible {port:?} du module {module:?} n'est pas une entrée")]
+    InvalidTargetPort { module: ModuleId, port: u32 },
+    #[error("Incompatibilité de signaux entre source ({src:?}) et cible ({dst:?})")]
+    IncompatibleSignalType { src: SignalType, dst: SignalType },
+}
+
+pub type GraphError = CompileError;
 
 /// Indice d'un scratch buffer préalloué dans le runtime audio
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -33,76 +53,186 @@ impl ExecutionPlan {
     }
 }
 
-/// Compile un graphe audio validé en un plan d'exécution linéaire
-pub fn compile_patch(graph: &AudioGraph, patch: &Patch) -> Result<ExecutionPlan, GraphError> {
-    let mut steps = Vec::with_capacity(graph.execution_order.len());
-    let mut buffer_counter: u16 = 0;
+/// Compilateur de Patch transformant un graphe modulaire en un plan d'exécution linéaire
+pub struct PatchCompiler;
 
-    // Table de correspondance (ModuleId, OutputPortId) -> BufferIndex
-    let mut output_routes: std::collections::HashMap<(ModuleId, u32), BufferIndex> =
-        std::collections::HashMap::new();
+impl PatchCompiler {
+    /// Valide la topologie, vérifie les invariants de câblage et compile le Patch en ExecutionPlan
+    pub fn compile(patch: &Patch) -> Result<ExecutionPlan, CompileError> {
+        let execution_order = Self::sort_topologically(patch)?;
 
-    // 1. Allouer un buffer pour chaque sortie qui alimente un câble
-    for cable in &patch.cables {
-        let route_key = (cable.from_module, cable.from_port.0);
-        output_routes.entry(route_key).or_insert_with(|| {
-            let idx = BufferIndex(buffer_counter);
-            buffer_counter += 1;
-            idx
-        });
+        let mut steps = Vec::with_capacity(execution_order.len());
+        let mut buffer_counter: u16 = 0;
+
+        let mut output_routes: HashMap<(ModuleId, u32), BufferIndex> = HashMap::new();
+
+        // 1. Allouer un buffer pour chaque sortie qui alimente un câble
+        for cable in &patch.cables {
+            let route_key = (cable.from_module, cable.from_port.0);
+            output_routes.entry(route_key).or_insert_with(|| {
+                let idx = BufferIndex(buffer_counter);
+                buffer_counter += 1;
+                idx
+            });
+        }
+
+        // 2. Ordonner séquentiellement les étapes selon execution_order
+        for &module_id in &execution_order {
+            let module = patch
+                .find_module(module_id)
+                .ok_or(CompileError::ModuleNotFound(module_id))?;
+
+            let mut input_buffers = Vec::new();
+            for port in &module.ports {
+                if port.direction == PortDirection::Input {
+                    if let Some(cable) = patch
+                        .cables
+                        .iter()
+                        .find(|c| c.to_module == module_id && c.to_port == port.id)
+                    {
+                        if let Some(&buf_idx) =
+                            output_routes.get(&(cable.from_module, cable.from_port.0))
+                        {
+                            input_buffers.push(buf_idx);
+                        }
+                    }
+                }
+            }
+
+            let mut output_buffers = Vec::new();
+            for port in &module.ports {
+                if port.direction == PortDirection::Output {
+                    if let Some(&buf_idx) = output_routes.get(&(module_id, port.id.0)) {
+                        output_buffers.push(buf_idx);
+                    }
+                }
+            }
+
+            let initial_parameters = module
+                .parameters
+                .iter()
+                .map(|p| p.current_value)
+                .collect();
+
+            steps.push(ExecutionStep {
+                module_id,
+                kind: module.kind,
+                input_buffers,
+                output_buffers,
+                initial_parameters,
+            });
+        }
+
+        Ok(ExecutionPlan {
+            steps,
+            required_scratch_buffers: buffer_counter as usize,
+        })
     }
 
-    // 2. Ordonner séquentiellement les étapes selon execution_order
-    for &module_id in &graph.execution_order {
-        let module = patch
-            .find_module(module_id)
-            .ok_or(GraphError::ModuleNotFound(module_id))?;
+    /// Trie les modules topologiquement via l'algorithme de Kahn tout en validant les câbles et cycles
+    fn sort_topologically(patch: &Patch) -> Result<Vec<ModuleId>, CompileError> {
+        let mut in_degree: HashMap<ModuleId, usize> = HashMap::new();
+        let mut adjacency: HashMap<ModuleId, Vec<ModuleId>> = HashMap::new();
 
-        // Résolution des buffers d'entrée connectés par des câbles vers ce module
-        let mut input_buffers = Vec::new();
-        for port in &module.ports {
-            if port.direction == crate::model::PortDirection::Input {
-                if let Some(cable) = patch
-                    .cables
-                    .iter()
-                    .find(|c| c.to_module == module_id && c.to_port == port.id)
-                {
-                    if let Some(&buf_idx) =
-                        output_routes.get(&(cable.from_module, cable.from_port.0))
-                    {
-                        input_buffers.push(buf_idx);
+        for module in &patch.modules {
+            in_degree.insert(module.id, 0);
+            adjacency.insert(module.id, Vec::new());
+        }
+
+        for cable in &patch.cables {
+            let from_mod = patch
+                .find_module(cable.from_module)
+                .ok_or(CompileError::ModuleNotFound(cable.from_module))?;
+            let to_mod = patch
+                .find_module(cable.to_module)
+                .ok_or(CompileError::ModuleNotFound(cable.to_module))?;
+
+            let from_port = from_mod
+                .ports
+                .iter()
+                .find(|p| p.id == cable.from_port)
+                .ok_or(CompileError::PortNotFound {
+                    module: cable.from_module,
+                    port: cable.from_port.0,
+                })?;
+
+            let to_port = to_mod
+                .ports
+                .iter()
+                .find(|p| p.id == cable.to_port)
+                .ok_or(CompileError::PortNotFound {
+                    module: cable.to_module,
+                    port: cable.to_port.0,
+                })?;
+
+            if from_port.direction != PortDirection::Output {
+                return Err(CompileError::InvalidSourcePort {
+                    module: cable.from_module,
+                    port: cable.from_port.0,
+                });
+            }
+
+            if to_port.direction != PortDirection::Input {
+                return Err(CompileError::InvalidTargetPort {
+                    module: cable.to_module,
+                    port: cable.to_port.0,
+                });
+            }
+
+            if from_port.signal_type != to_port.signal_type {
+                let is_cv_audio_cross = matches!(
+                    (from_port.signal_type, to_port.signal_type),
+                    (SignalType::Audio, SignalType::ControlVoltage)
+                        | (SignalType::ControlVoltage, SignalType::Audio)
+                );
+                if !is_cv_audio_cross {
+                    return Err(CompileError::IncompatibleSignalType {
+                        src: from_port.signal_type,
+                        dst: to_port.signal_type,
+                    });
+                }
+            }
+
+            adjacency
+                .get_mut(&cable.from_module)
+                .unwrap()
+                .push(cable.to_module);
+
+            *in_degree.get_mut(&cable.to_module).unwrap() += 1;
+        }
+
+        let mut queue: VecDeque<ModuleId> = VecDeque::new();
+        for (&mod_id, &deg) in &in_degree {
+            if deg == 0 {
+                queue.push_back(mod_id);
+            }
+        }
+
+        let mut execution_order = Vec::with_capacity(patch.modules.len());
+
+        while let Some(current) = queue.pop_front() {
+            execution_order.push(current);
+
+            if let Some(neighbors) = adjacency.get(&current) {
+                for &neighbor in neighbors {
+                    let entry = in_degree.get_mut(&neighbor).unwrap();
+                    *entry -= 1;
+                    if *entry == 0 {
+                        queue.push_back(neighbor);
                     }
                 }
             }
         }
 
-        // Résolution des buffers de sortie
-        let mut output_buffers = Vec::new();
-        for port in &module.ports {
-            if port.direction == crate::model::PortDirection::Output {
-                if let Some(&buf_idx) = output_routes.get(&(module_id, port.id.0)) {
-                    output_buffers.push(buf_idx);
-                }
-            }
+        if execution_order.len() != patch.modules.len() {
+            return Err(CompileError::CycleDetected);
         }
 
-        let initial_parameters = module
-            .parameters
-            .iter()
-            .map(|p| p.current_value)
-            .collect();
-
-        steps.push(ExecutionStep {
-            module_id,
-            kind: module.kind,
-            input_buffers,
-            output_buffers,
-            initial_parameters,
-        });
+        Ok(execution_order)
     }
+}
 
-    Ok(ExecutionPlan {
-        steps,
-        required_scratch_buffers: buffer_counter as usize,
-    })
+/// Raccourci pour compiler un Patch
+pub fn compile_patch(patch: &Patch) -> Result<ExecutionPlan, CompileError> {
+    PatchCompiler::compile(patch)
 }
