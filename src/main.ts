@@ -2,34 +2,21 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { GridInteractionHandler } from "./canvas/interaction";
 import { GridRenderer } from "./canvas/renderer";
+import { PatchSession } from "./session";
 import { Patch, TelemetryFrame } from "./types";
 
 let isPlaying = false;
-const btnPower = document.getElementById(
-  "btn-power",
-) as HTMLButtonElement | null;
-const masterGain = document.getElementById(
-  "master-gain",
-) as HTMLInputElement | null;
-const gainLabel = document.getElementById(
-  "gain-label",
-) as HTMLSpanElement | null;
-const canvas = document.getElementById(
-  "grid-canvas",
-) as HTMLCanvasElement | null;
+const btnPower = document.getElementById("btn-power") as HTMLButtonElement | null;
+const masterGain = document.getElementById("master-gain") as HTMLInputElement | null;
+const gainLabel = document.getElementById("gain-label") as HTMLSpanElement | null;
+const canvas = document.getElementById("grid-canvas") as HTMLCanvasElement | null;
 
-const meterBarL = document.getElementById(
-  "meter-bar-l",
-) as HTMLDivElement | null;
-const meterBarR = document.getElementById(
-  "meter-bar-r",
-) as HTMLDivElement | null;
-const meterNumeric = document.getElementById(
-  "meter-numeric",
-) as HTMLDivElement | null;
+const meterBarL = document.getElementById("meter-bar-l") as HTMLDivElement | null;
+const meterBarR = document.getElementById("meter-bar-r") as HTMLDivElement | null;
+const meterNumeric = document.getElementById("meter-numeric") as HTMLDivElement | null;
 
-// Modèle de patch interactif
-const currentPatch: Patch = {
+// Modèle de patch initial
+const initialPatch: Patch = {
   version: "1.0.0",
   name: "Interactive Patch",
   modules: [
@@ -111,32 +98,13 @@ const currentPatch: Patch = {
   ],
 };
 
-// Fonction pour synchroniser le patch avec le backend Host Rust
-async function syncPatchWithBackend(): Promise<void> {
-  try {
-    await invoke("apply_patch", { patch: currentPatch });
-    console.log("Patch synchronisé avec succès");
-  } catch (err) {
-    console.warn("Synchronisation du patch:", err);
-  }
-}
+// Instance centrale de session de patch
+const session = new PatchSession(initialPatch);
 
 // Initialisation du Canvas 2D interactif
 if (canvas) {
   const renderer = new GridRenderer(canvas);
-
-  const interaction = new GridInteractionHandler(canvas, currentPatch, {
-    onPatchModified: () => {
-      syncPatchWithBackend();
-    },
-    onParameterChange: async (moduleId, paramId, value) => {
-      try {
-        await invoke("set_parameter", { moduleId, paramId, value });
-      } catch (err) {
-        console.warn("set_parameter error:", err);
-      }
-    },
-  });
+  const interaction = new GridInteractionHandler(canvas, session);
 
   window.addEventListener("resize", () => {
     renderer.resize();
@@ -146,7 +114,7 @@ if (canvas) {
   // Boucle d'animation fluide à 60/120 FPS
   function renderLoop() {
     renderer.render(
-      currentPatch,
+      session.getPatch(),
       interaction.activeWire,
       interaction.hoveredPort,
       interaction.selectedModuleId,
@@ -182,7 +150,7 @@ if (btnPower) {
     isPlaying = !isPlaying;
     try {
       if (isPlaying) {
-        await syncPatchWithBackend();
+        await session.sync();
         await invoke("start_audio");
         btnPower.classList.add("active");
         btnPower.textContent = "Audio ON";
@@ -215,9 +183,7 @@ if (masterGain) {
 // Export / Import de Patch (.json / .grid)
 const btnSave = document.getElementById("btn-save") as HTMLButtonElement | null;
 const btnLoad = document.getElementById("btn-load") as HTMLButtonElement | null;
-const fileInput = document.getElementById(
-  "file-input",
-) as HTMLInputElement | null;
+const fileInput = document.getElementById("file-input") as HTMLInputElement | null;
 
 if (btnSave) {
   btnSave.addEventListener("click", async () => {
@@ -227,6 +193,7 @@ if (btnSave) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
+      const currentPatch = session.getPatch();
       a.download = `${currentPatch.name.toLowerCase().replace(/\s+/g, "-")}.grid.json`;
       a.click();
       URL.revokeObjectURL(url);
@@ -250,11 +217,8 @@ if (btnLoad && fileInput) {
       const loadedPatch = (await invoke("import_patch", {
         jsonStr: text,
       })) as Patch;
-      // Remplacer le patch en mémoire
-      currentPatch.name = loadedPatch.name;
-      currentPatch.modules = loadedPatch.modules;
-      currentPatch.cables = loadedPatch.cables;
-      console.log("Patch chargé avec succès:", currentPatch.name);
+      await session.loadPatch(loadedPatch);
+      console.log("Patch chargé avec succès:", loadedPatch.name);
     } catch (err) {
       console.error("Erreur import patch:", err);
       alert(`Erreur d'importation du patch: ${err}`);

@@ -1,4 +1,5 @@
-import { Cable, ModuleInstance, Patch, SignalType } from "../types";
+import { PatchSession } from "../session";
+import { ModuleInstance, SignalType } from "../types";
 import {
   ActiveWire,
   getPortCoordinates,
@@ -7,18 +8,9 @@ import {
   PORT_RADIUS,
 } from "./renderer";
 
-export interface InteractionCallbacks {
-  onPatchModified: () => void;
-  onParameterChange: (moduleId: number, paramId: number, value: f32) => void;
-}
-
-// alias f32 -> number
-type f32 = number;
-
 export class GridInteractionHandler {
   private canvas: HTMLCanvasElement;
-  private patch: Patch;
-  private callbacks: InteractionCallbacks;
+  private session: PatchSession;
 
   public activeWire: ActiveWire | null = null;
   public hoveredPort: { moduleId: number; portId: number } | null = null;
@@ -29,20 +21,11 @@ export class GridInteractionHandler {
   private isDraggingParam = false;
   private activeParamModule: ModuleInstance | null = null;
 
-  constructor(
-    canvas: HTMLCanvasElement,
-    patch: Patch,
-    callbacks: InteractionCallbacks,
-  ) {
+  constructor(canvas: HTMLCanvasElement, session: PatchSession) {
     this.canvas = canvas;
-    this.patch = patch;
-    this.callbacks = callbacks;
+    this.session = session;
 
     this.bindEvents();
-  }
-
-  public updatePatch(patch: Patch): void {
-    this.patch = patch;
   }
 
   private getCanvasPos(e: MouseEvent): { x: number; y: number } {
@@ -66,7 +49,8 @@ export class GridInteractionHandler {
       direction: "Input" | "Output";
     };
   } | null {
-    for (const mod of this.patch.modules) {
+    const patch = this.session.getPatch();
+    for (const mod of patch.modules) {
       for (const port of mod.ports) {
         const coords = getPortCoordinates(mod, port.id);
         if (!coords) continue;
@@ -80,9 +64,9 @@ export class GridInteractionHandler {
   }
 
   private findModuleAt(x: number, y: number): ModuleInstance | null {
-    // Parcourir à l'envers pour sélectionner le module au premier plan
-    for (let i = this.patch.modules.length - 1; i >= 0; i--) {
-      const mod = this.patch.modules[i];
+    const patch = this.session.getPatch();
+    for (let i = patch.modules.length - 1; i >= 0; i--) {
+      const mod = patch.modules[i];
       if (
         x >= mod.position.x &&
         x <= mod.position.x + MODULE_WIDTH &&
@@ -103,14 +87,13 @@ export class GridInteractionHandler {
   }
 
   private onMouseDown(e: MouseEvent): void {
-    if (e.button !== 0) return; // Clic gauche uniquement
+    if (e.button !== 0) return;
     const { x, y } = this.getCanvasPos(e);
 
-    // 1. Clic sur un port ?
+    // 1. Clic sur un port
     const portHit = this.findPortAt(x, y);
     if (portHit) {
       if (portHit.coords.direction === "Output") {
-        // Démarrage du tirage de câble depuis une sortie
         this.activeWire = {
           fromModuleId: portHit.mod.id,
           fromPortId: portHit.portId,
@@ -122,24 +105,18 @@ export class GridInteractionHandler {
         };
         return;
       } else {
-        // Clic sur une entrée déjà connectée : débrancher le câble existant
-        const existingIdx = this.patch.cables.findIndex(
-          (c) => c.to_module === portHit.mod.id && c.to_port === portHit.portId,
-        );
-        if (existingIdx !== -1) {
-          this.patch.cables.splice(existingIdx, 1);
-          this.callbacks.onPatchModified();
-          return;
-        }
+        // Clic sur une entrée déjà connectée : débrancher le câble
+        this.session.disconnectCableAt(portHit.mod.id, portHit.portId);
+        return;
       }
     }
 
-    // 2. Clic sur un module ?
+    // 2. Clic sur un module
     const modHit = this.findModuleAt(x, y);
     if (modHit) {
       this.selectedModuleId = modHit.id;
 
-      // Clic sur la jauge de paramètre ? (zone y entre position.y + 115 et + 140)
+      // Clic sur le curseur de paramètre
       if (y >= modHit.position.y + 115 && y <= modHit.position.y + 142) {
         this.isDraggingParam = true;
         this.activeParamModule = modHit;
@@ -147,7 +124,7 @@ export class GridInteractionHandler {
         return;
       }
 
-      // Clic sur l'en-tête (zone de drag)
+      // Clic sur l'en-tête (déplacement)
       if (y <= modHit.position.y + 36) {
         this.isDraggingModule = true;
         this.dragOffset = {
@@ -169,14 +146,14 @@ export class GridInteractionHandler {
       ? { moduleId: portHit.mod.id, portId: portHit.portId }
       : null;
 
-    // Déplacement de câble en cours
+    // Déplacement du câble en cours
     if (this.activeWire) {
       this.activeWire.currentX = x;
       this.activeWire.currentY = y;
       return;
     }
 
-    // Déplacement de slider paramètre
+    // Déplacement de curseur de paramètre
     if (this.isDraggingParam && this.activeParamModule) {
       this.adjustParameter(this.activeParamModule, x);
       return;
@@ -184,13 +161,11 @@ export class GridInteractionHandler {
 
     // Déplacement de module
     if (this.isDraggingModule && this.selectedModuleId !== null) {
-      const mod = this.patch.modules.find(
-        (m) => m.id === this.selectedModuleId,
+      this.session.moveModule(
+        this.selectedModuleId,
+        x - this.dragOffset.x,
+        y - this.dragOffset.y,
       );
-      if (mod) {
-        mod.position.x = Math.max(10, x - this.dragOffset.x);
-        mod.position.y = Math.max(10, y - this.dragOffset.y);
-      }
     }
   }
 
@@ -200,41 +175,13 @@ export class GridInteractionHandler {
     // Fin de tirage de câble
     if (this.activeWire) {
       const targetPort = this.findPortAt(x, y);
-      if (
-        targetPort &&
-        targetPort.coords.direction === "Input" &&
-        targetPort.mod.id !== this.activeWire.fromModuleId
-      ) {
-        // Vérifier la compatibilité des signaux
-        const srcType = this.activeWire.signalType;
-        const dstType = targetPort.coords.type;
-        const isCompatible =
-          srcType === dstType ||
-          (srcType === "Audio" && dstType === "ControlVoltage") ||
-          (srcType === "ControlVoltage" && dstType === "Audio");
-
-        if (isCompatible) {
-          // Supprimer un éventuel câble existant sur cette entrée
-          this.patch.cables = this.patch.cables.filter(
-            (c) =>
-              !(
-                c.to_module === targetPort.mod.id &&
-                c.to_port === targetPort.portId
-              ),
-          );
-
-          // Ajouter le nouveau câble
-          const newCable: Cable = {
-            id: Date.now() % 1000000,
-            from_module: this.activeWire.fromModuleId,
-            from_port: this.activeWire.fromPortId,
-            to_module: targetPort.mod.id,
-            to_port: targetPort.portId,
-          };
-          this.patch.cables.push(newCable);
-
-          this.callbacks.onPatchModified();
-        }
+      if (targetPort && targetPort.coords.direction === "Input") {
+        this.session.connectCable(
+          this.activeWire.fromModuleId,
+          this.activeWire.fromPortId,
+          targetPort.mod.id,
+          targetPort.portId,
+        );
       }
       this.activeWire = null;
     }
@@ -248,20 +195,10 @@ export class GridInteractionHandler {
     e.preventDefault();
     const { x, y } = this.getCanvasPos(e);
 
-    // Clic droit sur un port d'entrée : déconnecter le câble
+    // Clic droit sur un port : déconnecter le câble
     const portHit = this.findPortAt(x, y);
     if (portHit) {
-      const lenBefore = this.patch.cables.length;
-      this.patch.cables = this.patch.cables.filter(
-        (c) =>
-          !(
-            (c.to_module === portHit.mod.id && c.to_port === portHit.portId) ||
-            (c.from_module === portHit.mod.id && c.from_port === portHit.portId)
-          ),
-      );
-      if (this.patch.cables.length !== lenBefore) {
-        this.callbacks.onPatchModified();
-      }
+      this.session.disconnectCableAt(portHit.mod.id, portHit.portId);
     }
   }
 
@@ -273,8 +210,6 @@ export class GridInteractionHandler {
 
     const ratio = Math.max(0, Math.min(1, (mouseX - trackLeft) / trackWidth));
     const newVal = param.min + ratio * (param.max - param.min);
-    param.current_value = newVal;
-
-    this.callbacks.onParameterChange(mod.id, param.id, newVal);
+    this.session.setParameter(mod.id, param.id, newVal);
   }
 }

@@ -20,6 +20,10 @@ _Avoid_: Slot, rack item, voice container
 A compiler that validates patch topology, checks port compatibility, detects cycles, and generates a linear ExecutionPlan.
 _Avoid_: Graph validator, topological sorter, scheduler
 
+**PatchSession**:
+The client-side state coordinator managing interactive patch mutations, connection rules, and backend synchronization.
+_Avoid_: Patch manager, store, state machine
+
 **ExecutionPlan**:
 A linear ordered sequence of audio execution steps and scratch buffer assignments compiled from a Patch.
 _Avoid_: Bytecode, pipeline, schedule
