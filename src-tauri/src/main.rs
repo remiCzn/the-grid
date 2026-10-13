@@ -18,7 +18,8 @@ fn main() {
             commands::apply_patch,
             commands::get_current_patch,
             commands::export_patch,
-            commands::import_patch
+            commands::import_patch,
+            commands::send_midi_event
         ])
         .run(tauri::generate_context!())
         .expect("Erreur lors de l'exécution de l'application Tauri");

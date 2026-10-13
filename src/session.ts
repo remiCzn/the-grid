@@ -1,9 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { Cable, ModuleInstance, Patch, PortDefinition, SignalType } from "./types";
+import { Cable, MidiEvent, ModuleInstance, Patch, PortDefinition, SignalType } from "./types";
 
 export interface BackendTransport {
   applyPatch(patch: Patch): Promise<void>;
   setParameter(moduleId: number, paramId: number, value: number): Promise<void>;
+  sendMidiEvent(event: MidiEvent): Promise<void>;
 }
 
 export class TauriBackendTransport implements BackendTransport {
@@ -20,6 +21,14 @@ export class TauriBackendTransport implements BackendTransport {
       await invoke("set_parameter", { moduleId, paramId, value });
     } catch (err) {
       console.warn("Tauri set_parameter warning:", err);
+    }
+  }
+
+  async sendMidiEvent(event: MidiEvent): Promise<void> {
+    try {
+      await invoke("send_midi_event", { event });
+    } catch (err) {
+      console.warn("Tauri send_midi_event warning:", err);
     }
   }
 }
@@ -158,6 +167,10 @@ export class PatchSession {
 
   public async sync(): Promise<void> {
     await this.transport.applyPatch(this.patch);
+  }
+
+  public async sendMidiEvent(event: MidiEvent): Promise<void> {
+    await this.transport.sendMidiEvent(event);
   }
 
   public subscribe(listener: (patch: Patch) => void): () => void {
