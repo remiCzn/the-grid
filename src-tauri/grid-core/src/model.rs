@@ -48,6 +48,7 @@ pub enum ModuleKind {
     Filter,
     Envelope,
     AudioOut,
+    MidiIn,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -277,6 +278,45 @@ impl ModuleInstance {
                     default_value: 0.8,
                     current_value: 0.8,
                 }],
+            },
+            ModuleKind::MidiIn => Self {
+                id,
+                kind,
+                name: name.to_string(),
+                position,
+                ports: vec![
+                    PortDefinition {
+                        id: PortId(0),
+                        name: "Pitch".to_string(),
+                        signal_type: SignalType::ControlVoltage,
+                        direction: PortDirection::Output,
+                    },
+                    PortDefinition {
+                        id: PortId(1),
+                        name: "Gate".to_string(),
+                        signal_type: SignalType::Trigger,
+                        direction: PortDirection::Output,
+                    },
+                    PortDefinition {
+                        id: PortId(2),
+                        name: "Velocity".to_string(),
+                        signal_type: SignalType::ControlVoltage,
+                        direction: PortDirection::Output,
+                    },
+                    PortDefinition {
+                        id: PortId(3),
+                        name: "Mod Wheel".to_string(),
+                        signal_type: SignalType::ControlVoltage,
+                        direction: PortDirection::Output,
+                    },
+                    PortDefinition {
+                        id: PortId(4),
+                        name: "Pitch Bend".to_string(),
+                        signal_type: SignalType::ControlVoltage,
+                        direction: PortDirection::Output,
+                    },
+                ],
+                parameters: Vec::new(),
             },
         }
     }

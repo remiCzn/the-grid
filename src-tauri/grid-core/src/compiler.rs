@@ -31,10 +31,10 @@ pub struct BufferIndex(pub u16);
 pub struct ExecutionStep {
     pub module_id: ModuleId,
     pub kind: ModuleKind,
-    /// Indices des scratch buffers d'entrée connectés
-    pub input_buffers: Vec<BufferIndex>,
-    /// Indices des scratch buffers de sortie produits
-    pub output_buffers: Vec<BufferIndex>,
+    /// Indices des scratch buffers d'entrée connectés par port d'entrée
+    pub input_buffers: Vec<Option<BufferIndex>>,
+    /// Indices des scratch buffers de sortie produits par port de sortie
+    pub output_buffers: Vec<Option<BufferIndex>>,
     /// Paramètres initiaux
     pub initial_parameters: Vec<f32>,
 }
@@ -85,34 +85,28 @@ impl PatchCompiler {
             let mut input_buffers = Vec::new();
             for port in &module.ports {
                 if port.direction == PortDirection::Input {
-                    if let Some(cable) = patch
+                    let buf_opt = patch
                         .cables
                         .iter()
                         .find(|c| c.to_module == module_id && c.to_port == port.id)
-                    {
-                        if let Some(&buf_idx) =
-                            output_routes.get(&(cable.from_module, cable.from_port.0))
-                        {
-                            input_buffers.push(buf_idx);
-                        }
-                    }
+                        .and_then(|cable| {
+                            output_routes
+                                .get(&(cable.from_module, cable.from_port.0))
+                                .copied()
+                        });
+                    input_buffers.push(buf_opt);
                 }
             }
 
             let mut output_buffers = Vec::new();
             for port in &module.ports {
                 if port.direction == PortDirection::Output {
-                    if let Some(&buf_idx) = output_routes.get(&(module_id, port.id.0)) {
-                        output_buffers.push(buf_idx);
-                    }
+                    let buf_opt = output_routes.get(&(module_id, port.id.0)).copied();
+                    output_buffers.push(buf_opt);
                 }
             }
 
-            let initial_parameters = module
-                .parameters
-                .iter()
-                .map(|p| p.current_value)
-                .collect();
+            let initial_parameters = module.parameters.iter().map(|p| p.current_value).collect();
 
             steps.push(ExecutionStep {
                 module_id,
@@ -156,14 +150,12 @@ impl PatchCompiler {
                     port: cable.from_port.0,
                 })?;
 
-            let to_port = to_mod
-                .ports
-                .iter()
-                .find(|p| p.id == cable.to_port)
-                .ok_or(CompileError::PortNotFound {
+            let to_port = to_mod.ports.iter().find(|p| p.id == cable.to_port).ok_or(
+                CompileError::PortNotFound {
                     module: cable.to_module,
                     port: cable.to_port.0,
-                })?;
+                },
+            )?;
 
             if from_port.direction != PortDirection::Output {
                 return Err(CompileError::InvalidSourcePort {
@@ -201,12 +193,22 @@ impl PatchCompiler {
             *in_degree.get_mut(&cable.to_module).unwrap() += 1;
         }
 
-        let mut queue: VecDeque<ModuleId> = VecDeque::new();
-        for (&mod_id, &deg) in &in_degree {
-            if deg == 0 {
-                queue.push_back(mod_id);
-            }
-        }
+        let mut root_nodes: Vec<ModuleId> = in_degree
+            .iter()
+            .filter(|&(_, &deg)| deg == 0)
+            .map(|(&mod_id, _)| mod_id)
+            .collect();
+
+        // Placer MidiIn en tete des noeuds sources, puis trier par ModuleId pour un ordre deterministe
+        root_nodes.sort_by_key(|&mod_id| {
+            let is_midi_in = patch
+                .find_module(mod_id)
+                .map(|m| m.kind == ModuleKind::MidiIn)
+                .unwrap_or(false);
+            (!is_midi_in, mod_id.0)
+        });
+
+        let mut queue: VecDeque<ModuleId> = VecDeque::from(root_nodes);
 
         let mut execution_order = Vec::with_capacity(patch.modules.len());
 
