@@ -61,6 +61,20 @@ impl AppState {
         }
     }
 
+    /// Envoie un evenement MIDI vers le thread audio via la queue lock-free SPSC
+    pub fn send_midi_event(&self, event: grid_core::midi::MidiEvent) -> Result<(), String> {
+        let mut lock = self.channels.lock().map_err(|e| e.to_string())?;
+        if let Some(channels) = lock.as_mut() {
+            channels
+                .midi_producer
+                .try_push(event)
+                .map_err(|_| "Queue MIDI saturée".to_string())?;
+            Ok(())
+        } else {
+            Err("Moteur audio non initialisé".to_string())
+        }
+    }
+
     /// Valide un patch, compile son graphe topologique et pousse le nouveau plan vers l'audio
     pub fn apply_patch(&self, patch: Patch) -> Result<(), String> {
         // 1. Validation topologique et compilation en plan linéaire

@@ -2,8 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { GridInteractionHandler } from "./canvas/interaction";
 import { GridRenderer } from "./canvas/renderer";
+import { ComputerKeyboard } from "./keyboard_input";
 import { PatchSession } from "./session";
 import { Patch, TelemetryFrame } from "./types";
+import { VirtualKeyboard } from "./virtual_keyboard";
 
 let isPlaying = false;
 const btnPower = document.getElementById("btn-power") as HTMLButtonElement | null;
@@ -15,16 +17,50 @@ const meterBarL = document.getElementById("meter-bar-l") as HTMLDivElement | nul
 const meterBarR = document.getElementById("meter-bar-r") as HTMLDivElement | null;
 const meterNumeric = document.getElementById("meter-numeric") as HTMLDivElement | null;
 
-// Modèle de patch initial
+// Modele de patch initial avec module MidiIn connecte
 const initialPatch: Patch = {
   version: "1.0.0",
   name: "Interactive Patch",
   modules: [
     {
+      id: 4,
+      kind: "MidiIn",
+      name: "MIDI In",
+      position: { x: 40, y: 80 },
+      ports: [
+        {
+          id: 0,
+          name: "pitch",
+          signal_type: "ControlVoltage",
+          direction: "Output",
+        },
+        { id: 1, name: "gate", signal_type: "Trigger", direction: "Output" },
+        {
+          id: 2,
+          name: "velocity",
+          signal_type: "ControlVoltage",
+          direction: "Output",
+        },
+        {
+          id: 3,
+          name: "mod_wheel",
+          signal_type: "ControlVoltage",
+          direction: "Output",
+        },
+        {
+          id: 4,
+          name: "pitch_bend",
+          signal_type: "ControlVoltage",
+          direction: "Output",
+        },
+      ],
+      parameters: [],
+    },
+    {
       id: 1,
       kind: "Oscillator",
       name: "VCO 1",
-      position: { x: 80, y: 120 },
+      position: { x: 280, y: 80 },
       ports: [
         {
           id: 0,
@@ -49,7 +85,7 @@ const initialPatch: Patch = {
       id: 2,
       kind: "Gain",
       name: "VCA 1",
-      position: { x: 360, y: 120 },
+      position: { x: 520, y: 80 },
       ports: [
         { id: 0, name: "In", signal_type: "Audio", direction: "Input" },
         {
@@ -75,7 +111,7 @@ const initialPatch: Patch = {
       id: 3,
       kind: "AudioOut",
       name: "Master Out",
-      position: { x: 640, y: 120 },
+      position: { x: 760, y: 80 },
       ports: [
         { id: 0, name: "Left", signal_type: "Audio", direction: "Input" },
         { id: 1, name: "Right", signal_type: "Audio", direction: "Input" },
@@ -93,13 +129,44 @@ const initialPatch: Patch = {
     },
   ],
   cables: [
-    { id: 1, from_module: 1, from_port: 1, to_module: 2, to_port: 0 },
-    { id: 2, from_module: 2, from_port: 2, to_module: 3, to_port: 0 },
+    { id: 1, from_module: 4, from_port: 0, to_module: 1, to_port: 0 },
+    { id: 2, from_module: 1, from_port: 1, to_module: 2, to_port: 0 },
+    { id: 3, from_module: 2, from_port: 2, to_module: 3, to_port: 0 },
   ],
 };
 
 // Instance centrale de session de patch
 const session = new PatchSession(initialPatch);
+
+// Initialisation du Clavier Virtuel et Clavier Ordinateur
+const appContainer = document.getElementById("app") || document.body;
+
+const virtualKeyboard = new VirtualKeyboard(appContainer, {
+  octave: 4,
+  layout: "AZERTY",
+  onMidiEvent: (event) => {
+    session.sendMidiEvent(event);
+  },
+  onOctaveChange: (oct) => {
+    computerKeyboard.setOctave(oct);
+  },
+  onLayoutChange: (layout) => {
+    computerKeyboard.setLayout(layout);
+  },
+});
+
+const computerKeyboard = new ComputerKeyboard({
+  octave: 4,
+  layout: "AZERTY",
+  onMidiEvent: (event) => {
+    session.sendMidiEvent(event);
+  },
+  onNoteChange: (note, active) => {
+    virtualKeyboard.setNoteActive(note, active);
+  },
+});
+
+computerKeyboard.attach(window);
 
 // Initialisation du Canvas 2D interactif
 if (canvas) {
