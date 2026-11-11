@@ -310,6 +310,31 @@ describe("ComputerKeyboard Input", () => {
     expect(kb.getActiveNotes().length).toBe(0);
     expect(emitted.length).toBe(4); // 2 NoteOn + 2 NoteOff
   });
+
+  it("ignores keydown events when focus is on interactive form elements", () => {
+    const emitted: MidiEvent[] = [];
+    const kb = new ComputerKeyboard({
+      layout: "AZERTY",
+      octave: 4,
+      onMidiEvent: (evt) => emitted.push(evt),
+    });
+
+    const mockInput = new MockElement("input");
+    const mockTextarea = new MockElement("textarea");
+    const mockSelect = new MockElement("select");
+    const mockContentEditable = new MockElement("div");
+    (mockContentEditable as any).isContentEditable = true;
+
+    // Keys pressed while input elements are focused must be ignored
+    expect(kb.handleKeyDown({ key: "a", target: mockInput as any })).toBeNull();
+    expect(kb.handleKeyDown({ key: "2", target: mockInput as any })).toBeNull(); // octave shortcut ignored too
+    expect(kb.handleKeyDown({ key: "a", target: mockTextarea as any })).toBeNull();
+    expect(kb.handleKeyDown({ key: "a", target: mockSelect as any })).toBeNull();
+    expect(kb.handleKeyDown({ key: "a", target: mockContentEditable as any })).toBeNull();
+
+    expect(emitted.length).toBe(0);
+    expect(kb.getOctave()).toBe(4);
+  });
 });
 
 describe("VirtualKeyboard Velocity Formula", () => {
@@ -511,5 +536,35 @@ describe("VirtualKeyboard Component & Glissando", () => {
 
     expect(mockWindow.getListenerCount("mouseup")).toBe(0);
     expect(mockWindow.getListenerCount("blur")).toBe(0);
+  });
+
+  it("synchronizes octave bidirectionally with ComputerKeyboard", () => {
+    setupMockDom();
+    const container = new MockElement("div") as any;
+
+    let vkRef: VirtualKeyboard | null = null;
+    let ckRef: ComputerKeyboard | null = null;
+
+    const vk = new VirtualKeyboard(container, {
+      octave: 4,
+      onOctaveChange: (oct) => ckRef?.setOctave(oct),
+    });
+    vkRef = vk;
+
+    const ck = new ComputerKeyboard({
+      octave: 4,
+      onOctaveChange: (oct) => vkRef?.setOctave(oct),
+    });
+    ckRef = ck;
+
+    // Transpose from ComputerKeyboard shortcut '2'
+    ck.handleKeyDown({ key: "2" });
+    expect(ck.getOctave()).toBe(5);
+    expect(vk.getOctave()).toBe(5);
+
+    // Transpose from VirtualKeyboard octave down
+    vk.octaveDown();
+    expect(vk.getOctave()).toBe(4);
+    expect(ck.getOctave()).toBe(4);
   });
 });

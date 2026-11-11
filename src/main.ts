@@ -164,6 +164,9 @@ const computerKeyboard = new ComputerKeyboard({
   onNoteChange: (note, active) => {
     virtualKeyboard.setNoteActive(note, active);
   },
+  onOctaveChange: (oct) => {
+    virtualKeyboard.setOctave(oct);
+  },
 });
 
 computerKeyboard.attach(window);

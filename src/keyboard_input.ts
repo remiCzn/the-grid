@@ -148,6 +148,16 @@ export class ComputerKeyboard {
   private onOctaveChange?: (octave: number) => void;
   private boundKeyDown = (e: Event) => {
     if (e instanceof KeyboardEvent) {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toUpperCase();
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        Boolean((target as any)?.isContentEditable)
+      ) {
+        return;
+      }
       this.handleKeyDown(e);
     }
   };
@@ -220,9 +230,23 @@ export class ComputerKeyboard {
     key: string;
     code?: string;
     repeat?: boolean;
+    target?: EventTarget | null;
   }): MidiEvent | null {
     if (e.repeat) {
       return null;
+    }
+
+    if (e.target && typeof (e.target as any).tagName === "string") {
+      const target = e.target as HTMLElement;
+      const tag = target.tagName.toUpperCase();
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        Boolean((target as any).isContentEditable)
+      ) {
+        return null;
+      }
     }
 
     // Octave transposition shortcuts:
