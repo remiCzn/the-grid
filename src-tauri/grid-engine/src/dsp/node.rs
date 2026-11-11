@@ -1,4 +1,4 @@
-use crate::dsp::{AdsrEnvelope, Oscillator, StateVariableFilter, VcaGain, Waveform};
+use crate::dsp::{AdsrEnvelope, MidiInNode, Oscillator, StateVariableFilter, VcaGain, Waveform};
 use grid_core::model::ModuleKind;
 
 /// Générateur de tension constante (DC / CV statique)
@@ -27,6 +27,7 @@ pub enum DspNode {
     Filter(StateVariableFilter),
     Envelope(AdsrEnvelope),
     Constant(ConstantNode),
+    MidiIn(MidiInNode),
     AudioOut,
 }
 
@@ -79,6 +80,7 @@ impl DspNode {
                 let val = initial_params.first().copied().unwrap_or(0.0);
                 Self::Constant(ConstantNode::new(val))
             }
+            ModuleKind::MidiIn => Self::MidiIn(MidiInNode::default()),
             ModuleKind::AudioOut => Self::AudioOut,
         }
     }
@@ -114,6 +116,9 @@ impl DspNode {
                 if let Some(out_buf) = outputs.first_mut() {
                     out_buf.fill(c.value);
                 }
+            }
+            Self::MidiIn(node) => {
+                node.process_block(outputs);
             }
             Self::AudioOut => {}
         }
@@ -152,6 +157,7 @@ impl DspNode {
                     c.set_value(value);
                 }
             }
+            Self::MidiIn(_) => {}
             Self::AudioOut => {}
         }
     }
@@ -173,6 +179,9 @@ impl DspNode {
                 env.reset();
             }
             Self::Constant(_) => {}
+            Self::MidiIn(node) => {
+                node.reset();
+            }
             Self::AudioOut => {}
         }
     }
