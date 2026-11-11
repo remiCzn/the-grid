@@ -46,3 +46,10 @@ impl VcaGain {
         }
     }
 }
+
+impl Default for VcaGain {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+

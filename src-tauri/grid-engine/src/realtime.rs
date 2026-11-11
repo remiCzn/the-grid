@@ -141,6 +141,23 @@ impl RealtimeAudioProcessor {
         }
     }
 
+    /// Traite un evenement MIDI recu sur le thread audio.
+    ///
+    /// Cette fonction est appelee dans la boucle temps reel a chaque evenement
+    /// consomme de maniere lock-free et sans allocation dynamique.
+    #[inline(always)]
+    fn handle_midi_event(&mut self, _event: grid_core::midi::MidiEvent) {
+        // En attente de l'integration du monophonic voice allocator (Tâche 8.2)
+    }
+
+    /// Traite un bloc d'echantillons entrelaces.
+    ///
+    /// Alias de `process_interleaved_buffer` conformement a la specification.
+    #[inline(always)]
+    pub fn process_block(&mut self, output: &mut [f32]) {
+        self.process_interleaved_buffer(output);
+    }
+
     #[inline(always)]
     pub fn process_interleaved_buffer(&mut self, output: &mut [f32]) {
         while let Ok(cmd) = self.channels.command_consumer.pop() {
@@ -177,6 +194,11 @@ impl RealtimeAudioProcessor {
                 }
             }
         }
+
+        while let Ok(event) = self.channels.midi_consumer.pop() {
+            self.handle_midi_event(event);
+        }
+
 
         let num_frames = (output.len() / 2).min(MAX_BLOCK_SIZE);
 
