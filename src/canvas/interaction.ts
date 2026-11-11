@@ -2,8 +2,8 @@ import { PatchSession } from "../session";
 import { ModuleInstance, SignalType } from "../types";
 import {
   ActiveWire,
+  getModuleHeight,
   getPortCoordinates,
-  MODULE_HEIGHT,
   MODULE_WIDTH,
   PORT_RADIUS,
 } from "./renderer";
@@ -67,11 +67,12 @@ export class GridInteractionHandler {
     const patch = this.session.getPatch();
     for (let i = patch.modules.length - 1; i >= 0; i--) {
       const mod = patch.modules[i];
+      const modHeight = getModuleHeight(mod);
       if (
         x >= mod.position.x &&
         x <= mod.position.x + MODULE_WIDTH &&
         y >= mod.position.y &&
-        y <= mod.position.y + MODULE_HEIGHT
+        y <= mod.position.y + modHeight
       ) {
         return mod;
       }

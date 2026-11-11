@@ -11,7 +11,15 @@ export type ModuleKind =
   | "Constant"
   | "Filter"
   | "Envelope"
-  | "AudioOut";
+  | "AudioOut"
+  | "MidiIn";
+
+export type MidiEvent =
+  | { NoteOn: { channel: number; note: number; velocity: number } }
+  | { NoteOff: { channel: number; note: number; velocity: number } }
+  | { ControlChange: { channel: number; controller: number; value: number } }
+  | { PitchBend: { channel: number; value: number } }
+  | { AllNotesOff: { channel: number } };
 
 export interface PortDefinition {
   id: number;

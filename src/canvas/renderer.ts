@@ -14,6 +14,14 @@ export const MODULE_WIDTH = 175;
 export const MODULE_HEIGHT = 150;
 export const PORT_RADIUS = 6;
 
+export function getModuleHeight(mod: ModuleInstance): number {
+  const inputCount = mod.ports.filter((p) => p.direction === "Input").length;
+  const outputCount = mod.ports.filter((p) => p.direction === "Output").length;
+  const maxPorts = Math.max(inputCount, outputCount);
+  const neededHeight = 60 + maxPorts * 28 + 12;
+  return Math.max(MODULE_HEIGHT, neededHeight);
+}
+
 export function getSignalColor(signalType: SignalType): string {
   switch (signalType) {
     case "Audio":
@@ -190,10 +198,12 @@ export class GridRenderer {
     ctx.shadowOffsetX = 0;
     ctx.shadowOffsetY = 6;
 
+    const modHeight = getModuleHeight(mod);
+
     // Fond de la carte modulaire
     ctx.fillStyle = "#1e2029";
     ctx.beginPath();
-    ctx.roundRect(mx, my, MODULE_WIDTH, MODULE_HEIGHT, 8);
+    ctx.roundRect(mx, my, MODULE_WIDTH, modHeight, 8);
     ctx.fill();
 
     // Bordure
@@ -214,7 +224,9 @@ export class GridRenderer {
         ? "#ff5200"
         : mod.kind === "Gain"
           ? "#00a8ff"
-          : "#2ecc71";
+          : mod.kind === "MidiIn"
+            ? "#a55eea"
+            : "#2ecc71";
     ctx.fillRect(mx + 10, my + 10, 4, 12);
 
     // Titre

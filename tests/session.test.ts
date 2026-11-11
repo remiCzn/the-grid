@@ -51,6 +51,7 @@ const mockPatch: Patch = {
 class MockTransport implements BackendTransport {
   public appliedPatches: Patch[] = [];
   public paramUpdates: { moduleId: number; paramId: number; value: number }[] = [];
+  public midiEvents: import("../src/types").MidiEvent[] = [];
 
   async applyPatch(patch: Patch): Promise<void> {
     this.appliedPatches.push(JSON.parse(JSON.stringify(patch)));
@@ -58,6 +59,10 @@ class MockTransport implements BackendTransport {
 
   async setParameter(moduleId: number, paramId: number, value: number): Promise<void> {
     this.paramUpdates.push({ moduleId, paramId, value });
+  }
+
+  async sendMidiEvent(event: import("../src/types").MidiEvent): Promise<void> {
+    this.midiEvents.push(event);
   }
 }
 
@@ -195,5 +200,18 @@ describe("PatchSession", () => {
 
     session.disconnectCableAt(2, 0);
     expect(callCount).toBe(3);
+  });
+
+  it("sends MIDI events to the transport", async () => {
+    const transport = new MockTransport();
+    const session = new PatchSession(mockPatch, transport);
+
+    const event: import("../src/types").MidiEvent = {
+      NoteOn: { channel: 0, note: 60, velocity: 100 },
+    };
+    await session.sendMidiEvent(event);
+
+    expect(transport.midiEvents.length).toBe(1);
+    expect(transport.midiEvents[0]).toEqual(event);
   });
 });

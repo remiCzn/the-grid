@@ -73,3 +73,11 @@ pub fn import_patch(json_str: String, state: State<'_, Arc<AppState>>) -> Result
     state.apply_patch(patch.clone())?;
     Ok(patch)
 }
+
+#[tauri::command]
+pub fn send_midi_event(
+    event: grid_core::midi::MidiEvent,
+    state: State<'_, Arc<AppState>>,
+) -> Result<(), String> {
+    state.send_midi_event(event)
+}

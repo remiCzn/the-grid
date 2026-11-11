@@ -156,3 +156,209 @@ body, html, #app {
   height: 100%;
   display: block;
 }
+
+/* Virtual Keyboard Dock */
+.virtual-keyboard-container {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+}
+
+.virtual-keyboard-container.folded {
+  transform: translateY(calc(100% - 26px));
+}
+
+.vk-toggle-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 16px;
+  pointer-events: auto;
+}
+
+.vk-toggle-btn {
+  background: #1a1c22;
+  border: 1px solid #282a32;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  color: #ff5200;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.vk-toggle-btn:hover {
+  background: #252834;
+  color: #ff7a33;
+}
+
+.vk-dock {
+  background: #161820;
+  border-top: 1px solid #282a32;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+  padding: 8px 16px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.vk-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 28px;
+  user-select: none;
+}
+
+.vk-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vk-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: #a55eea;
+}
+
+.vk-controls-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vk-btn {
+  background: #252834;
+  border: 1px solid #363a48;
+  color: #e0e2e8;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.vk-btn:hover {
+  background: #313646;
+  border-color: #4a5064;
+}
+
+.vk-btn-layout {
+  color: #00a8ff;
+}
+
+.vk-oct-display {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ff5200;
+  min-width: 55px;
+  text-align: center;
+}
+
+.vk-keys-track {
+  display: flex;
+  position: relative;
+  height: 120px;
+  width: 100%;
+  user-select: none;
+  touch-action: none;
+  background: #121316;
+  border: 1px solid #282a32;
+  border-radius: 6px;
+  overflow: visible;
+}
+
+.vk-key-white {
+  flex: 1;
+  position: relative;
+  height: 100%;
+  background: linear-gradient(180deg, #222530 0%, #1a1c24 100%);
+  border-right: 1px solid #121316;
+  border-radius: 0 0 4px 4px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding-bottom: 6px;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: background 0.08s ease, box-shadow 0.08s ease;
+  z-index: 1;
+}
+
+.vk-key-white:last-child {
+  border-right: none;
+}
+
+.vk-key-white.active {
+  background: linear-gradient(180deg, #ff7a33 0%, #ff5200 100%);
+  box-shadow: 0 0 16px rgba(255, 82, 0, 0.7), inset 0 -2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.vk-key-black {
+  position: absolute;
+  top: 0;
+  right: -13px;
+  width: 26px;
+  height: 60%;
+  background: linear-gradient(180deg, #181920 0%, #0c0d10 100%);
+  border: 1px solid #282a32;
+  border-top: none;
+  border-radius: 0 0 3px 3px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  padding-bottom: 4px;
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: background 0.08s ease, box-shadow 0.08s ease;
+}
+
+.vk-key-black.active {
+  background: linear-gradient(180deg, #b86bff 0%, #a55eea 100%);
+  box-shadow: 0 0 16px rgba(165, 94, 234, 0.8), inset 0 -2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.vk-key-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #7d8296;
+  pointer-events: none;
+}
+
+.vk-key-white.active .vk-key-label,
+.vk-key-black.active .vk-key-label {
+  color: #ffffff;
+}
+
+.vk-key-hint {
+  font-size: 9px;
+  font-weight: 700;
+  color: #ff5200;
+  margin-top: 2px;
+  pointer-events: none;
+}
+
+.vk-key-black .vk-key-hint {
+  color: #a55eea;
+}
+
+.vk-key-white.active .vk-key-hint,
+.vk-key-black.active .vk-key-hint {
+  color: #ffffff;
+}
+
